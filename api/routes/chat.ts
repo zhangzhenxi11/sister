@@ -17,7 +17,12 @@ const conversations: Conversation[] = [];
 
 router.post('/chat', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { message, conversationId, personaId, useRag = false } = req.body;
+    const { message, conversationId, personaId, useRag = true } = req.body;
+    
+    console.log('=== /api/chat/chat ===');
+    console.log('message:', message);
+    console.log('personaId:', personaId);
+    console.log('useRag:', useRag);
 
     if (!message) {
       res.status(400).json({ success: false, error: 'Message is required' });
@@ -57,7 +62,7 @@ router.post('/chat', async (req: Request, res: Response): Promise<void> => {
           body: JSON.stringify({
             message,
             conversationHistory: history.slice(-5),
-            useRag,
+            useRag: true,  // Always use RAG when using persona
           }),
         });
         

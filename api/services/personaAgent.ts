@@ -78,13 +78,24 @@ class PersonaAgent {
     const startTime = Date.now();
     
     try {
+      console.log('=== PersonaAgent.process ===');
+      console.log('useRag:', input.useRag);
+      console.log('knowledgeGraph length:', this.persona.knowledgeGraph?.length);
+      
       let contextInfo = '';
       
       if (input.useRag && this.persona.knowledgeGraph && this.persona.knowledgeGraph.length > 0) {
         const relevantKnowledge = this.findRelevantKnowledge(input.userMessage);
+        console.log('Relevant knowledge count:', relevantKnowledge.length);
+        
         if (relevantKnowledge.length > 0) {
           contextInfo = `\n\n## 你在学习资料中学到的知识（回答时要引用这些知识）：\n${relevantKnowledge.map(k => `- ${k.content}`).join('\n')}`;
+        } else {
+          console.log('No relevant knowledge found, using ALL knowledge');
+          contextInfo = `\n\n## 你在学习资料中学到的知识（回答时要引用这些知识）：\n${this.persona.knowledgeGraph.map(k => `- ${k.content}`).join('\n')}`;
         }
+      } else {
+        console.log('No knowledge graph or useRag is false');
       }
 
       const thoughtProcess = await this.think(input, contextInfo);
@@ -116,11 +127,36 @@ class PersonaAgent {
 
   private findRelevantKnowledge(query: string): KnowledgeNode[] {
     if (!this.persona.knowledgeGraph || this.persona.knowledgeGraph.length === 0) {
+      console.log('Knowledge graph is empty');
       return [];
     }
 
+    console.log('=== RAG Search ===');
+    console.log('Query:', query);
+    console.log('Total knowledge nodes:', this.persona.knowledgeGraph.length);
+
     const queryLower = query.toLowerCase();
-    const keywords = queryLower.split(/\s+/).filter(w => w.length > 2);
+    
+    const keywords = [
+      ...queryLower.split(/\s+/).filter(w => w.length > 1),
+      ...queryLower.split(/[,，、。.]/).filter(w => w.length > 1)
+    ];
+    
+    const semanticKeywords: Record<string, string[]> = {
+      '女性': ['女性', '女生', '女孩', '女人', '她'],
+      '恋爱': ['恋爱', '追女生', '把妹', '撩妹', '约会', '交往', '两性'],
+      '心理': ['心理', '内心', '想法', '思维', '动机'],
+      '沟通': ['沟通', '交流', '说话', '表达'],
+      '情感': ['情感', '感情', '情绪', '感觉'],
+    };
+    
+    for (const [key, values] of Object.entries(semanticKeywords)) {
+      if (values.some(v => queryLower.includes(v))) {
+        keywords.push(...values);
+      }
+    }
+    
+    console.log('Search keywords:', [...new Set(keywords)]);
     
     const scored = this.persona.knowledgeGraph.map(node => {
       let score = 0;
@@ -128,18 +164,34 @@ class PersonaAgent {
       
       for (const keyword of keywords) {
         if (contentLower.includes(keyword)) {
-          score += keyword.length;
+          score += keyword.length * 2;
         }
       }
       
-      score += node.weight * 10;
+      if (queryLower.includes('女性') || queryLower.includes('女生') || queryLower.includes('她')) {
+        if (contentLower.includes('女性') || contentLower.includes('女生')) {
+          score += 100;
+        }
+      }
+      
+      if (queryLower.includes('心理') || queryLower.includes('想法')) {
+        if (contentLower.includes('心理') || contentLower.includes('内心') || contentLower.includes('矛盾')) {
+          score += 80;
+        }
+      }
+      
+      score += node.weight * 20;
       
       return { node, score };
     });
     
     scored.sort((a, b) => b.score - a.score);
     
-    return scored.filter(s => s.score > 0).slice(0, 5).map(s => s.node);
+    const results = scored.slice(0, 5).map(s => s.node);
+    console.log('Found relevant knowledge:', results.length, 'nodes');
+    console.log('Top results:', results.map(r => r.content?.slice(0, 50)));
+    
+    return results;
   }
 
   private async think(context: ProcessingContext, contextInfo: string): Promise<ThoughtProcess> {
@@ -192,49 +244,61 @@ ${context.userMessage}
     const openai = getOpenAI();
     const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
+    console.log('=== Execute Phase ===');
+    console.log('contextInfo:', contextInfo ? contextInfo.slice(0, 200) : 'EMPTY');
+
     const rulesContent = this.persona.rules?.map(r => 
       `规则${r.priority} (${r.name}): ${r.action}`
     ).join('\n') || '';
 
-    const executionPrompt = `
-你正在以"${this.persona.name}"的身份回复用户。
+    const combinedSystemPrompt = `
+# 你的身份
+你是"${this.persona.name}"，你是一个知识传递者。
 
-# 你的身份设定
-${this.persona.systemPrompt}
+# 知识库（唯一知识来源）
+${contextInfo || '【无知识库】'}
 
-# 你必须遵守的规则
-${rulesContent}
-
-# 你从学习资料中获得的知识（回答时要引用这些知识）
-${contextInfo || '无'}
-
-# 思考过程参考
-${thoughtProcess.analysis}
-
-# 对话历史
-${this.persona.stats?.totalConversations || 0}轮对话经验
-
-请直接给出回复，不要重复思考过程。回复要：
-1. 符合你的身份设定
-2. 适当引用你学到的知识
-3. 保持自然、温暖、有帮助
+# 回答规则（必须遵守）
+1. 直接讲述知识库中的内容，不添加任何解释
+2. 禁止说"我觉得"、"你应该"、"要尊重"之类的建议
+3. 禁止道德说教、禁止劝人为善
+4. 禁止"多沟通"、"多理解"这种废话
+5. 只输出知识，不输出观点
+6. 如果知识库没相关内容，只说"我不知道"
 `;
 
-    const response = await openai.chat.completions.create({
-      model,
-      messages: [
-        { role: 'system', content: this.persona.systemPrompt },
-        { role: 'user', content: executionPrompt },
-      ],
-      temperature: this.getTemperatureByStyle(),
-      max_tokens: 1000,
-    });
+    const executionPrompt = `
+用户问题: ${userMessage}
 
-    return {
-      content: response.choices[0].message.content || '',
-      confidence: 0.8,
-      usedKnowledge: this.persona.knowledgeGraph?.slice(0, 3).map(k => k.id) || [],
-    };
+直接回答，只输出知识。
+`;
+
+    console.log('System prompt:', combinedSystemPrompt.slice(0, 300));
+    console.log('User prompt:', executionPrompt);
+
+    try {
+      const response = await openai.chat.completions.create({
+        model,
+        messages: [
+          { role: 'system', content: combinedSystemPrompt },
+          { role: 'user', content: executionPrompt },
+        ],
+        temperature: this.getTemperatureByStyle(),
+        max_tokens: 1500,
+      });
+
+      const content = response.choices[0].message.content || '';
+      console.log('AI Response:', content.slice(0, 300));
+
+      return {
+        content: content,
+        confidence: 0.8,
+        usedKnowledge: this.persona.knowledgeGraph?.slice(0, 3).map(k => k.id) || [],
+      };
+    } catch (error: any) {
+      console.error('Execute error:', error.message);
+      throw error;
+    }
   }
 
   private getTemperatureByStyle(): number {

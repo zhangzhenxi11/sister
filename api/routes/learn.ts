@@ -5,17 +5,16 @@ import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import { processVideo, processAudio, processImage, processText, processPdf, type MaterialType } from '../services/multimodal.js';
 import { addVectors } from '../services/vectorStore.js';
+import { getMaterials, addMaterial, saveMaterials, loadMaterials, loadPersonas, addPersona, type Material, type Persona } from '../data/store.js';
+import { generatePersonaFromMaterials } from '../services/personaAgent.js';
 
 const router = express.Router();
 
-const uploadDir = path.join(process.cwd(), 'uploads');
-const dataDir = path.join(process.cwd(), 'data');
+loadMaterials();
 
+const uploadDir = path.join(process.cwd(), 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
-}
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
 }
 
 const storage = multer.diskStorage({
@@ -34,8 +33,6 @@ const upload = multer({
     fileSize: 100 * 1024 * 1024,
   },
 });
-
-export const materials: Material[] = [];
 
 function detectFileType(filename: string): MaterialType {
   const ext = filename.toLowerCase().split('.').pop() || '';
@@ -74,7 +71,7 @@ router.post(
         createdAt: new Date(),
       };
 
-      materials.push(material);
+      addMaterial(material);
 
       let processed;
       switch (materialType) {
@@ -100,6 +97,13 @@ router.post(
       material.content = processed.content;
       material.status = 'completed';
 
+      const materials = getMaterials();
+      const index = materials.findIndex(m => m.id === material.id);
+      if (index !== -1) {
+        materials[index] = material;
+        saveMaterials(materials);
+      }
+
       try {
         await addVectors([
           {
@@ -115,7 +119,6 @@ router.post(
         console.warn('Vector storage failed, continuing without RAG:', vectorError);
       }
 
-      saveMaterialsToFile();
       res.json({ success: true, data: material });
     } catch (error) {
       console.error('Upload error:', error);
@@ -124,38 +127,14 @@ router.post(
   }
 );
 
-function saveMaterialsToFile() {
-  try {
-    const data = materials.map(m => ({
-      ...m,
-      filePath: undefined,
-    }));
-    fs.writeFileSync(path.join(dataDir, 'materials.json'), JSON.stringify(data, null, 2));
-  } catch (error) {
-    console.error('Failed to save materials:', error);
-  }
-}
-
-function loadMaterialsFromFile() {
-  try {
-    const filePath = path.join(dataDir, 'materials.json');
-    if (fs.existsSync(filePath)) {
-      const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-      materials.push(...data);
-    }
-  } catch (error) {
-    console.error('Failed to load materials:', error);
-  }
-}
-
-loadMaterialsFromFile();
-
 router.get('/materials', (req: Request, res: Response): void => {
+  const materials = getMaterials();
   res.json({ success: true, data: materials });
 });
 
 router.delete('/materials/:id', (req: Request, res: Response): void => {
   const { id } = req.params;
+  const materials = getMaterials();
   const index = materials.findIndex(m => m.id === id);
 
   if (index === -1) {
@@ -164,17 +143,18 @@ router.delete('/materials/:id', (req: Request, res: Response): void => {
   }
 
   const material = materials[index];
-  if (fs.existsSync(material.filePath)) {
+  if (material.filePath && fs.existsSync(material.filePath)) {
     fs.unlinkSync(material.filePath);
   }
 
   materials.splice(index, 1);
-  saveMaterialsToFile();
+  saveMaterials(materials);
   res.json({ success: true });
 });
 
 router.get('/materials/:id', (req: Request, res: Response): void => {
   const { id } = req.params;
+  const materials = getMaterials();
   const material = materials.find(m => m.id === id);
 
   if (!material) {
@@ -210,6 +190,87 @@ router.get('/local-files', (req: Request, res: Response): void => {
   } catch (error) {
     console.error('Error reading local files:', error);
     res.json({ success: true, data: [] });
+  }
+});
+
+router.post('/persona', async (req: Request, res: Response): Promise<void> => {
+  try {
+    loadPersonas();
+    
+    const { name, description, style, materialIds = [] } = req.body;
+
+    if (!name && materialIds.length === 0) {
+      res.status(400).json({ success: false, error: 'Name or materialIds is required' });
+      return;
+    }
+
+    console.log('Creating persona with materialIds:', materialIds);
+    console.log('All materials before filter:', getMaterials().map(m => ({ id: m.id, title: m.title, status: m.status })));
+
+    let personaData: Omit<Persona, 'id' | 'createdAt' | 'updatedAt'>;
+
+    if (materialIds.length > 0) {
+      const allMaterials = getMaterials();
+      const selectedMaterials = allMaterials.filter(m => materialIds.includes(m.id) && m.status === 'completed');
+      
+      console.log('Selected materials for persona:', selectedMaterials.map(m => ({ id: m.id, title: m.title, contentLength: m.content?.length })));
+
+      if (selectedMaterials.length === 0) {
+        res.status(400).json({ success: false, error: 'No valid materials found. Please upload and process materials first.' });
+        return;
+      }
+
+      personaData = await generatePersonaFromMaterials(
+        selectedMaterials.map(m => ({
+          id: m.id,
+          content: m.content || m.summary || '',
+          summary: m.summary,
+          type: m.type,
+        })),
+        name
+      );
+    } else {
+      personaData = {
+        name: name || 'AI人格',
+        description: description || '',
+        style: style || 'gentle',
+        systemPrompt: description || '你是一个温暖的AI情感助手。',
+        knowledgeGraph: [],
+        rules: [
+          {
+            id: 'rule-1',
+            name: '基本规则',
+            description: '保持友好和专业',
+            priority: 1,
+            action: '保持友好和专业',
+          },
+        ],
+        stats: {
+          totalConversations: 0,
+          successfulInteractions: 0,
+          failedInteractions: 0,
+          feedbackScores: [],
+          lastUpdated: new Date(),
+        },
+      };
+    }
+
+    const persona: Persona = {
+      ...personaData,
+      id: uuidv4(),
+      isActive: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      materialIds,
+    };
+
+    addPersona(persona);
+    console.log('Persona created successfully:', persona.name);
+
+    res.json({ success: true, data: persona });
+  } catch (error) {
+    console.error('Create persona error:', error);
+    res.status(500).json({ success: false, error: 'Failed to create persona' });
   }
 });
 

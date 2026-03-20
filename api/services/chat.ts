@@ -1,5 +1,26 @@
 import { default as OpenAI } from 'openai';
 import { searchSimilar } from './vectorStore.js';
+import { getMaterials } from '../data/store.js';
+
+async function simpleSearchSimilar(query: string, limit: number): Promise<Array<{ id: string; content: string; score: number }>> {
+  const materials = getMaterials();
+  if (materials.length === 0) return [];
+  
+  const queryLower = query.toLowerCase();
+  const keywords = queryLower.split(/\s+/).filter(w => w.length > 1);
+  
+  const scored = materials.map(m => {
+    let score = 0;
+    const contentLower = (m.content || m.summary || '').toLowerCase();
+    for (const kw of keywords) {
+      if (contentLower.includes(kw)) score += kw.length;
+    }
+    return { id: m.id, content: m.content || m.summary || '', score };
+  });
+  
+  scored.sort((a, b) => b.score - a.score);
+  return scored.filter(s => s.score > 0).slice(0, limit);
+}
 
 function getOpenAI() {
   return new OpenAI({
@@ -46,9 +67,17 @@ export async function generateResponse(
 
   let context = '';
   if (useRag) {
-    const similarContent = await searchSimilar(userMessage, ragLimit);
-    if (similarContent.length > 0) {
-      context = `\n\n相关学习资料：\n${similarContent.map(c => `- ${c.content}`).join('\n')}`;
+    try {
+      const similarContent = await searchSimilar(userMessage, ragLimit);
+      if (similarContent.length > 0) {
+        context = `\n\n相关学习资料：\n${similarContent.map(c => `- ${c.content}`).join('\n')}`;
+      }
+    } catch (error) {
+      console.log('Vector search failed, using simple search');
+      const simpleResult = await simpleSearchSimilar(userMessage, ragLimit);
+      if (simpleResult.length > 0) {
+        context = `\n\n相关学习资料：\n${simpleResult.map(c => `- ${c.content}`).join('\n')}`;
+      }
     }
   }
 

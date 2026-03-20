@@ -1,4 +1,5 @@
 import { QdrantClient } from '@qdrant/js-client-rest';
+import { getMaterials } from '../data/store.js';
 
 const qdrantHost = process.env.QDRANT_HOST || '127.0.0.1';
 const qdrantPort = parseInt(process.env.QDRANT_PORT || '6333');
@@ -57,20 +58,60 @@ export async function searchSimilar(
   query: string,
   limit: number = 5
 ): Promise<Array<{ id: string; content: string; score: number }>> {
-  const queryEmbedding = await getEmbedding(query);
+  try {
+    const queryEmbedding = await getEmbedding(query);
 
-  const searchResult = await qdrantClient.search(COLLECTION_NAME, {
-    vector: queryEmbedding,
-    limit,
-    with_payload: true,
-  });
+    const searchResult = await qdrantClient.search(COLLECTION_NAME, {
+      vector: queryEmbedding,
+      limit,
+      with_payload: true,
+    });
 
-  return searchResult.map((r) => ({
-    id: r.id as string,
-    content: (r.payload as { content?: string }).content || '',
-    score: r.score,
-  }));
+    return searchResult.map((r) => ({
+      id: r.id as string,
+      content: (r.payload as { content?: string }).content || '',
+      score: r.score,
+    }));
+  } catch (error) {
+    console.log('searchSimilar: Qdrant failed, using simple fallback');
+    return simpleSearch(query, limit);
+  }
 }
+
+function simpleSearch(query: string, limit: number): Array<{ id: string; content: string; score: number }> {
+  const materials = getMaterials();
+  console.log('simpleSearch: materials count:', materials.length);
+  if (materials.length === 0) return [];
+  
+  const queryLower = query.toLowerCase();
+  // 分词：按每个汉字/词搜索
+  const chars = queryLower.split('').filter(c => c.trim().length > 0);
+  const keywords = [...new Set(chars)].filter(c => c.length > 0);
+  console.log('simpleSearch: keywords:', keywords);
+  
+  if (keywords.length === 0) {
+    return materials.slice(0, limit).map(m => ({
+      id: m.id,
+      content: m.content || m.summary || '',
+      score: 1
+    }));
+  }
+  
+  const scored = materials.map(m => {
+    let score = 0;
+    const contentLower = (m.content || m.summary || '').toLowerCase();
+    for (const kw of keywords) {
+      if (contentLower.includes(kw)) score += 1;
+    }
+    // 至少匹配1个关键词就有分
+    return { id: m.id, content: m.content || m.summary || '', score };
+  });
+  
+  scored.sort((a, b) => b.score - a.score);
+  const result = scored.slice(0, limit);
+  console.log('simpleSearch: result:', result.map(r => ({ id: r.id, score: r.score, content: r.content?.slice(0, 30) })));
+  return result;
+ }
 
 export async function deleteVector(id: string): Promise<void> {
   await qdrantClient.delete(COLLECTION_NAME, {

@@ -13,7 +13,7 @@ export default function Chat() {
   const { activePersonaId, personas, setActivePersona } = useLearnStore();
   
   const [input, setInput] = useState('');
-  const [useRag, setUseRag] = useState(false);
+  const [useRag, setUseRag] = useState(true);
   const [showPersonaSelector, setShowPersonaSelector] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -205,10 +205,21 @@ export default function Chat() {
               <div
                 key={conv.id}
                 onClick={() => setCurrentConversation(conv.id)}
-                className={`p-3 border-b cursor-pointer hover:bg-gray-50 ${conv.id === currentConversation?.id ? 'bg-pink-50 border-l-4 border-l-pink-500' : ''}`}
+                className={`p-3 border-b cursor-pointer hover:bg-gray-50 group relative ${conv.id === currentConversation?.id ? 'bg-pink-50 border-l-4 border-l-pink-500' : ''}`}
               >
-                <div className="text-xs text-gray-600 truncate">{conv.title || '新对话'}</div>
+                <div className="text-xs text-gray-600 truncate pr-6">{conv.title || '新对话'}</div>
                 <div className="text-xs text-gray-400">{conv.messages.length} 条</div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (confirm('确定删除这个聊天记录吗？')) {
+                      deleteConversation(conv.id);
+                    }
+                  }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
               </div>
             ))}
           </div>

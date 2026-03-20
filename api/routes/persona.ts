@@ -1,50 +1,12 @@
 import express, { type Request, type Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import path from 'path';
-import fs from 'fs';
 import { createPersonaAgent, generatePersonaFromMaterials, type Persona, type UserFeedback } from '../services/personaAgent.js';
-import { searchSimilar } from '../services/vectorStore.js';
-import { materials } from './learn.js';
+import { getMaterials, getPersonas, addPersona, updatePersona, deletePersona, savePersonas, loadMaterials, loadPersonas } from '../data/store.js';
 
 const router = express.Router();
 
-const dataDir = path.join(process.cwd(), 'data');
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
-}
-
-export interface PersonaRecord extends Persona {
-  isActive: boolean;
-}
-
-const personas: PersonaRecord[] = [];
-const agentInstances: Map<string, ReturnType<typeof createPersonaAgent>> = new Map();
-
-function savePersonasToFile() {
-  try {
-    const data = personas.map(p => ({
-      ...p,
-      knowledgeGraph: p.knowledgeGraph?.slice(0, 10),
-    }));
-    fs.writeFileSync(path.join(dataDir, 'personas.json'), JSON.stringify(data, null, 2));
-  } catch (error) {
-    console.error('Failed to save personas:', error);
-  }
-}
-
-function loadPersonasFromFile() {
-  try {
-    const filePath = path.join(dataDir, 'personas.json');
-    if (fs.existsSync(filePath)) {
-      const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-      personas.push(...data);
-    }
-  } catch (error) {
-    console.error('Failed to load personas:', error);
-  }
-}
-
-loadPersonasFromFile();
+loadMaterials();
+loadPersonas();
 
 router.post('/persona', async (req: Request, res: Response): Promise<void> => {
   try {
@@ -58,19 +20,16 @@ router.post('/persona', async (req: Request, res: Response): Promise<void> => {
     let personaData: Omit<Persona, 'id' | 'createdAt' | 'updatedAt'>;
 
     if (materialIds.length > 0) {
-      console.log('Requested materialIds:', materialIds);
-      console.log('Available materials:', materials.map(m => ({ id: m.id, title: m.title, status: m.status })));
+      const allMaterials = getMaterials();
+      console.log('All materials in store:', allMaterials.map(m => ({ id: m.id, title: m.title, status: m.status })));
       
-      const selectedMaterials = materials.filter(m => materialIds.includes(m.id) && m.status === 'completed');
-      
-      console.log('Filtered materials:', selectedMaterials);
+      const selectedMaterials = allMaterials.filter(m => materialIds.includes(m.id) && m.status === 'completed');
+      console.log('Selected materials:', selectedMaterials.map(m => ({ id: m.id, title: m.title, contentLength: m.content?.length })));
       
       if (selectedMaterials.length === 0) {
-        res.status(400).json({ success: false, error: 'No valid materials found' });
+        res.status(400).json({ success: false, error: 'No valid materials found. Please upload and process materials first.' });
         return;
       }
-
-      console.log('Creating persona with materials:', selectedMaterials.map(m => ({ id: m.id, title: m.title, hasContent: !!m.content })));
 
       personaData = await generatePersonaFromMaterials(
         selectedMaterials.map(m => ({
@@ -107,17 +66,16 @@ router.post('/persona', async (req: Request, res: Response): Promise<void> => {
       };
     }
 
-    const persona: PersonaRecord = {
+    const persona: Persona = {
       ...personaData,
       id: uuidv4(),
       isActive: false,
       createdAt: new Date(),
       updatedAt: new Date(),
+      materialIds,
     };
 
-    personas.push(persona);
-    agentInstances.set(persona.id, createPersonaAgent(persona));
-    savePersonasToFile();
+    addPersona(persona);
 
     res.json({ success: true, data: persona });
   } catch (error) {
@@ -127,11 +85,13 @@ router.post('/persona', async (req: Request, res: Response): Promise<void> => {
 });
 
 router.get('/personas', (req: Request, res: Response): void => {
+  const personas = getPersonas();
   res.json({ success: true, data: personas });
 });
 
 router.get('/persona/:id', (req: Request, res: Response): void => {
   const { id } = req.params;
+  const personas = getPersonas();
   const persona = personas.find(p => p.id === id);
 
   if (!persona) {
@@ -144,31 +104,28 @@ router.get('/persona/:id', (req: Request, res: Response): void => {
 
 router.put('/persona/:id/activate', (req: Request, res: Response): void => {
   const { id } = req.params;
-  const index = personas.findIndex(p => p.id === id);
-
-  if (index === -1) {
-    res.status(404).json({ success: false, error: 'Persona not found' });
-    return;
-  }
-
+  const personas = getPersonas();
+  
   personas.forEach((p, i) => {
     personas[i].isActive = p.id === id;
   });
-
-  savePersonasToFile();
-  res.json({ success: true, data: personas[index] });
+  
+  savePersonas(personas);
+  const activated = personas.find(p => p.id === id);
+  res.json({ success: true, data: activated });
 });
 
 router.put('/persona/:id', (req: Request, res: Response): void => {
   const { id } = req.params;
+  const { name, description, style, systemPrompt, rules } = req.body;
+  
+  const personas = getPersonas();
   const index = personas.findIndex(p => p.id === id);
 
   if (index === -1) {
     res.status(404).json({ success: false, error: 'Persona not found' });
     return;
   }
-
-  const { name, description, style, systemPrompt, rules } = req.body;
 
   personas[index] = {
     ...personas[index],
@@ -180,27 +137,13 @@ router.put('/persona/:id', (req: Request, res: Response): void => {
     updatedAt: new Date(),
   };
 
-  if (agentInstances.has(id)) {
-    agentInstances.set(id, createPersonaAgent(personas[index]));
-  }
-
-  savePersonasToFile();
+  savePersonas(personas);
   res.json({ success: true, data: personas[index] });
 });
 
 router.delete('/persona/:id', (req: Request, res: Response): void => {
   const { id } = req.params;
-  const index = personas.findIndex(p => p.id === id);
-
-  if (index === -1) {
-    res.status(404).json({ success: false, error: 'Persona not found' });
-    return;
-  }
-
-  personas.splice(index, 1);
-  agentInstances.delete(id);
-  savePersonasToFile();
-
+  deletePersona(id);
   res.json({ success: true });
 });
 
@@ -208,38 +151,54 @@ router.post('/persona/:id/feedback', (req: Request, res: Response): void => {
   const { id } = req.params;
   const { feedback, comment, messageId, conversationId } = req.body;
 
-  const agent = agentInstances.get(id);
-  if (!agent) {
+  const personas = getPersonas();
+  const persona = personas.find(p => p.id === id);
+
+  if (!persona) {
     res.status(404).json({ success: false, error: 'Persona not found' });
     return;
   }
 
-  const userFeedback: UserFeedback = {
-    conversationId,
-    messageId,
-    feedback: feedback || 'neutral',
-    comment,
-    timestamp: new Date(),
-  };
+  if (!persona.stats) {
+    persona.stats = {
+      totalConversations: 0,
+      successfulInteractions: 0,
+      failedInteractions: 0,
+      feedbackScores: [],
+      lastUpdated: new Date(),
+    };
+  }
 
-  agent.addFeedback(userFeedback);
-  savePersonasToFile();
+  persona.stats.totalConversations++;
+  if (feedback === 'positive') {
+    persona.stats.successfulInteractions++;
+    persona.stats.feedbackScores.push(1);
+  } else if (feedback === 'negative') {
+    persona.stats.failedInteractions++;
+    persona.stats.feedbackScores.push(-1);
+  } else {
+    persona.stats.feedbackScores.push(0);
+  }
+  persona.stats.lastUpdated = new Date();
 
+  savePersonas(personas);
   res.json({ success: true });
 });
 
 router.post('/persona/:id/reflect', async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
 
-  const agent = agentInstances.get(id);
-  if (!agent) {
+  const personas = getPersonas();
+  const persona = personas.find(p => p.id === id);
+
+  if (!persona) {
     res.status(404).json({ success: false, error: 'Persona not found' });
     return;
   }
 
   try {
+    const agent = createPersonaAgent(persona);
     const reflection = await agent.reflect();
-    savePersonasToFile();
     res.json({ success: true, data: reflection });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Reflection failed' });
@@ -249,24 +208,28 @@ router.post('/persona/:id/reflect', async (req: Request, res: Response): Promise
 router.post('/persona/:id/chat', async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { message, conversationHistory = [], useRag = false } = req.body;
-
+    const { message, conversationHistory = [], useRag = true } = req.body;
+    
+    console.log('=== Incoming Chat Request ===');
+    console.log('personaId:', id);
+    console.log('message:', message);
+    console.log('message length:', message?.length);
+    console.log('useRag:', useRag);
+    
     if (!message) {
       res.status(400).json({ success: false, error: 'Message is required' });
       return;
     }
 
+    const personas = getPersonas();
     const persona = personas.find(p => p.id === id);
+
     if (!persona) {
       res.status(404).json({ success: false, error: 'Persona not found' });
       return;
     }
 
-    let agent = agentInstances.get(id);
-    if (!agent) {
-      agent = createPersonaAgent(persona);
-      agentInstances.set(id, agent);
-    }
+    const agent = createPersonaAgent(persona);
 
     const response = await agent.process({
       userMessage: message,
