@@ -1,0 +1,45 @@
+# 情感AI伴侣 —— 单机部署编排
+#
+# 用法：
+#   首次/更新后构建并启动   docker compose up -d --build
+#   查看日志               docker compose logs -f app
+#   停止                   docker compose down
+#
+# 说明：
+#   - app 单容器同时提供前端页面与 API（端口 3001 → 宿主机 80）
+#   - 数据（data/）与上传文件（uploads/）通过 named volume 持久化
+#   - 有域名后：把 deploy/Caddyfile.example 复制为 deploy/Caddyfile 填入域名，
+#     然后 `docker compose --profile tls up -d` 启用自动 HTTPS
+
+services:
+  app:
+    build: .
+    container_name: emo-companion
+    ports:
+      - "80:3001"
+    volumes:
+      - app-data:/app/data
+      - app-uploads:/app/uploads
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+
+  # 可选：HTTPS 终结（有域名后启用）
+  caddy:
+    image: caddy:2-alpine
+    container_name: emo-caddy
+    profiles: ["tls"]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    restart: unless-stopped
+
+volumes:
+  app-data:
+  app-uploads:
+  caddy-data:

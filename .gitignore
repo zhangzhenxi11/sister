@@ -12,6 +12,30 @@ dist
 dist-ssr
 *.local
 
+# 环境变量（含 API Key，严禁提交）
+.env
+.env.*
+!.env.example
+
+# 用户运行时数据（JSON 存储）
+data/*.json
+!data/.gitkeep
+
+# 用户上传文件
+uploads/*
+!uploads/.gitkeep
+!uploads/frames/.gitkeep
+
+# 备份与临时产物
+*.bak
+
+# 工作区内部数据
+.workbuddy/
+
+# 原生壳工程（可通过 npx cap add android/ios 重新生成）
+android/
+ios/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

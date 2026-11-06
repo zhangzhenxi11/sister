@@ -9,25 +9,25 @@ import express, {
 } from 'express'
 import cors from 'cors'
 import path from 'path'
+import fs from 'fs'
 import dotenv from 'dotenv'
 import { fileURLToPath } from 'url'
 import authRoutes from './routes/auth.js'
 import learnRoutes from './routes/learn.js'
 import personaRoutes from './routes/persona.js'
 import chatRoutes from './routes/chat.js'
+import analyzeRoutes from './routes/analyze.js'
 
-// for esm mode
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-// load env
 dotenv.config()
 
 const app: express.Application = express()
 
 app.use(cors())
-app.use(express.json({ 
-  limit: '10mb',
+app.use(express.json({
+  limit: '25mb',
   verify: (req: any, _res, buf) => {
     req.rawBody = buf;
   }
@@ -39,13 +39,25 @@ app.use((req: Request, res: Response, next: NextFunction): void => {
   next();
 });
 
-/**
- * API Routes
- */
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+
 app.use('/api/auth', authRoutes)
 app.use('/api/learn', learnRoutes)
 app.use('/api/learn', personaRoutes)
 app.use('/api/chat', chatRoutes)
+app.use('/api/analyze', analyzeRoutes)
+
+/**
+ * 生产模式：Express 直接托管前端构建产物（单容器部署形态）。
+ * SPA 路由回退到 index.html；/api 与 /uploads 已在上方注册，不受影响。
+ */
+const distDir = path.join(process.cwd(), 'dist');
+if (fs.existsSync(distDir)) {
+  app.use(express.static(distDir));
+  app.get(/^(?!\/(api|uploads)\/).*/, (_req: Request, res: Response) => {
+    res.sendFile(path.join(distDir, 'index.html'));
+  });
+}
 
 /**
  * health

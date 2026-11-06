@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Send, Plus, Trash2, Settings, Sparkles, User, Check, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Send, Plus, Trash2, Settings, Sparkles, User, Check, ChevronDown, Image, X } from 'lucide-react';
 import { useChatStore, type Message } from '@/stores/chatStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useLearnStore, type Persona } from '@/stores/learnStore';
@@ -15,6 +15,9 @@ export default function Chat() {
   const [input, setInput] = useState('');
   const [useRag, setUseRag] = useState(true);
   const [showPersonaSelector, setShowPersonaSelector] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const currentConversation = conversations.find(c => c.id === (id || currentConversationId));
@@ -29,15 +32,47 @@ export default function Chat() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [currentConversation?.messages]);
 
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    console.log('handleImageSelect called, file:', file);
+    if (file) {
+      if (!file.type.startsWith('image/')) {
+        alert('请选择图片文件');
+        return;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        alert('图片大小不能超过10MB');
+        return;
+      }
+      console.log('Setting selectedImage:', file.name, file.size, file.type);
+      setSelectedImage(file);
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        console.log('FileReader loaded, preview set');
+        setImagePreview(e.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleRemoveImage = () => {
+    setSelectedImage(null);
+    setImagePreview(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
+    if ((!input.trim() && !selectedImage) || isLoading) return;
+
+    const imageToSend = selectedImage;
+    const textToSend = input;
 
     let conversationId = currentConversation?.id;
-    
+
     if (!conversationId) {
       const newConversation = {
         id: uuidv4(),
-        title: input.slice(0, 30),
+        title: textToSend.slice(0, 30) || '图片对话',
         messages: [],
         createdAt: new Date(),
       };
@@ -48,23 +83,36 @@ export default function Chat() {
     const userMessage: Message = {
       id: uuidv4(),
       role: 'user',
-      content: input,
+      content: textToSend,
       timestamp: new Date(),
+      imageUrl: imagePreview || undefined,
     };
 
     addMessage(conversationId!, userMessage);
     setInput('');
+    setSelectedImage(null);
+    setImagePreview(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
     setLoading(true);
 
     try {
+      let imageBase64 = null;
+      if (imageToSend) {
+        console.log('Uploading image:', imageToSend.name, imageToSend.size, imageToSend.type);
+        imageBase64 = imagePreview;
+      } else {
+        console.log('No image to upload');
+      }
+
       const response = await fetch('/api/chat/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: input,
+          message: textToSend,
           conversationId,
           personaId: activePersonaId,
           useRag,
+          image: imageBase64,
         }),
       });
 
@@ -253,6 +301,14 @@ export default function Chat() {
                       : 'bg-white text-gray-800 shadow-md'
                   }`}
                 >
+                  {msg.imageUrl && (
+                    <img
+                      src={msg.imageUrl}
+                      alt="上传的图片"
+                      className="max-w-full rounded-lg mb-2 cursor-pointer hover:opacity-90 transition-opacity"
+                      onClick={() => window.open(msg.imageUrl, '_blank')}
+                    />
+                  )}
                   <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                   <p className={`text-xs mt-1 ${msg.role === 'user' ? 'text-pink-100' : 'text-gray-400'}`}>
                     {new Date(msg.timestamp).toLocaleTimeString()}
@@ -276,7 +332,32 @@ export default function Chat() {
           </div>
 
           <div className="p-4 bg-white border-t">
+            {imagePreview && (
+              <div className="mb-2 relative inline-block">
+                <img src={imagePreview} alt="预览" className="max-h-24 rounded-lg" />
+                <button
+                  onClick={handleRemoveImage}
+                  className="absolute -top-2 -right-2 p-1 bg-red-500 text-white rounded-full hover:bg-red-600"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
             <div className="flex items-end gap-2">
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept="image/*"
+                onChange={handleImageSelect}
+                className="hidden"
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="p-3 bg-gray-100 hover:bg-gray-200 rounded-full text-gray-600"
+                title="上传图片"
+              >
+                <Image className="w-5 h-5" />
+              </button>
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -292,7 +373,7 @@ export default function Chat() {
               />
               <button
                 onClick={handleSend}
-                disabled={!input.trim() || isLoading}
+                disabled={!input.trim() && !selectedImage || isLoading}
                 className="p-3 bg-gradient-to-r from-pink-500 to-purple-500 rounded-full text-white disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Send className="w-5 h-5" />

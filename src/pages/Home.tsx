@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { MessageCircle, BookOpen, Heart, Settings, User, Brain } from 'lucide-react';
+import { MessageCircle, BookOpen, Heart, Settings, User, Brain, ScanLine } from 'lucide-react';
 
 export default function Home() {
   return (
@@ -13,6 +13,21 @@ export default function Home() {
         </div>
 
         <div className="space-y-4">
+          <Link
+            to="/analyze"
+            className="block bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-[1.02]"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 bg-gradient-to-br from-fuchsia-400 to-pink-600 rounded-2xl flex items-center justify-center">
+                <ScanLine className="w-7 h-7 text-white" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-800">截图分析</h3>
+                <p className="text-sm text-gray-500">上传聊天截图，识别信号并给出策略建议</p>
+              </div>
+            </div>
+          </Link>
+
           <Link
             to="/chat"
             className="block bg-white rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-[1.02]"

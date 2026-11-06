@@ -8,10 +8,15 @@ import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
 async function parsePdf(filePath: string): Promise<{ text: string; numpages: number }> {
-  const pdfParse = await import('pdf-parse');
+  const { PDFParse } = await import('pdf-parse');
   const dataBuffer = fs.readFileSync(filePath);
-  const data = await pdfParse.default(dataBuffer);
-  return { text: data.text, numpages: data.numpages };
+  const parser = new PDFParse({ data: dataBuffer });
+  try {
+    const result = await parser.getText();
+    return { text: result.text, numpages: result.total };
+  } finally {
+    await parser.destroy().catch(() => {});
+  }
 }
 
 function getOpenAI() {
@@ -158,28 +163,50 @@ export async function processText(filePath: string): Promise<ProcessedMaterial> 
   };
 }
 
-async function analyzeImage(imagePath: string, prompt: string): Promise<string> {
-  const base64Image = fs.readFileSync(imagePath).toString('base64');
-  const openai = getOpenAI();
+export async function analyzeImage(imageData: string, prompt: string): Promise<string> {
+  console.log('=== analyzeImage ===');
+  console.log('Image data starts with:', imageData.substring(0, 30));
+  
+  try {
+    if (imageData.startsWith('data:')) {
+      console.log('Using Tesseract OCR for image analysis...');
+      const result = await Tesseract.recognize(imageData, 'chi_sim+eng', {
+        logger: (m) => console.log('OCR progress:', Math.round(m.progress * 100) + '%'),
+      });
+      
+      const ocrText = result.data.text.trim();
+      console.log('OCR result:', ocrText ? ocrText.substring(0, 200) : 'No text found');
+      
+      if (ocrText) {
+        return `图片文字内容：\n${ocrText}`;
+      }
+    }
+    
+    console.log('No text found via OCR, trying GPT Vision as fallback...');
+    const openai = getOpenAI();
 
-  const response = await openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-    messages: [
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: prompt },
-          {
-            type: 'image_url',
-            image_url: { url: `data:image/jpeg;base64,${base64Image}` },
-          },
-        ],
-      },
-    ],
-    max_tokens: 500,
-  });
+    const response = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            {
+              type: 'image_url',
+              image_url: { url: imageData, detail: 'low' },
+            },
+          ],
+        },
+      ],
+      max_tokens: 500,
+    });
 
-  return response.choices[0].message.content || '';
+    return response.choices[0].message.content || '';
+  } catch (error: any) {
+    console.error('Image analysis failed:', error.message);
+    return '[图片分析失败]';
+  }
 }
 
 async function summarizeContent(content: string, prompt: string): Promise<string> {

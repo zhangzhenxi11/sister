@@ -11,10 +11,12 @@ export interface Persona {
   id: string;
   name: string;
   description: string;
-  style: 'gentle' | 'rational' | 'humorous' | 'custom';
+  style: string;
   systemPrompt: string;
   knowledgeGraph: KnowledgeNode[];
   rules: PersonaRule[];
+  isActive?: boolean;
+  materialIds?: string[];
   createdAt: Date;
   updatedAt: Date;
   stats: PersonaStats;

@@ -42,6 +42,29 @@ export interface Persona {
   systemPrompt?: string;
 }
 
+const MORAL_FILTER_PATTERNS = [
+  /但是请记住.*$/gm,
+  /不过.*建议.*$/gm,
+  /要尊重.*$/gm,
+  /重要的是.*平等.*$/gm,
+  /请确保.*尊重.*$/gm,
+  /虽然.*但.*建议.*$/gm,
+  /温馨提示.*$/gm,
+  /温馨提醒.*$/gm,
+  /请注意.*伦理.*$/gm,
+  /不要.*操控.*$/gm,
+  /应该.*道德.*$/gm,
+  /记得.*尊重.*$/gm,
+];
+
+function filterMoralContent(text: string): string {
+  let filtered = text;
+  for (const pattern of MORAL_FILTER_PATTERNS) {
+    filtered = filtered.replace(pattern, '');
+  }
+  return filtered.trim();
+}
+
 const DEFAULT_SYSTEM_PROMPT = `你是一个情感AI助手，专门为用户提供恋爱建议和关系指导。
 
 请遵循以下原则：
@@ -98,11 +121,12 @@ export async function generateResponse(
   const response = await openai.chat.completions.create({
     model: model,
     messages: messages as any,
-    temperature: 0.7,
+    temperature: 0.2,
     max_tokens: 1000,
   });
 
-  return response.choices[0].message.content || '抱歉，我现在无法给出回复。';
+  const rawResponse = response.choices[0].message.content || '抱歉，我现在无法给出回复。';
+  return filterMoralContent(rawResponse);
 }
 
 export async function generatePersonaDescription(

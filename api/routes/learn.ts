@@ -220,15 +220,18 @@ router.post('/persona', async (req: Request, res: Response): Promise<void> => {
         return;
       }
 
-      personaData = await generatePersonaFromMaterials(
-        selectedMaterials.map(m => ({
-          id: m.id,
-          content: m.content || m.summary || '',
-          summary: m.summary,
-          type: m.type,
-        })),
-        name
-      );
+      personaData = {
+        ...(await generatePersonaFromMaterials(
+          selectedMaterials.map(m => ({
+            id: m.id,
+            content: m.content || m.summary || '',
+            summary: m.summary,
+            type: m.type,
+          })),
+          name
+        )),
+        isActive: false,
+      };
     } else {
       personaData = {
         name: name || 'AI人格',
@@ -245,6 +248,7 @@ router.post('/persona', async (req: Request, res: Response): Promise<void> => {
             action: '保持友好和专业',
           },
         ],
+        isActive: false,
         stats: {
           totalConversations: 0,
           successfulInteractions: 0,

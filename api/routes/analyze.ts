@@ -1,0 +1,157 @@
+/**
+ * /api/analyze —— 截图分析
+ *
+ * POST   /api/analyze              JSON body { image: base64 }（兼容旧端，移动端不推荐）
+ * POST   /api/analyze/upload       multipart 文件上传（推荐：二进制 + 客户端压缩）
+ * GET    /api/analyze              历史分析列表（摘要）
+ * GET    /api/analyze/rules        当前生效的规则（可解释性）
+ * GET    /api/analyze/:id          单次分析详情
+ * DELETE /api/analyze/:id          删除分析
+ * POST   /api/analyze/:id/feedback 用户反馈（回流规则调权）
+ *
+ * 认证：optionalAuth —— 携带 Bearer token 时结果归属该用户，未登录也可匿名使用。
+ */
+import express, { type Request, type Response, type NextFunction } from 'express';
+import multer from 'multer';
+import { v4 as uuidv4 } from 'uuid';
+import { analyzeScreenshot } from '../services/analysis/index.js';
+import { listRules } from '../services/rules/engine.js';
+import { optionalAuth } from '../middleware/auth.js';
+import {
+  addAnalysis,
+  addFeedback,
+  deleteAnalysis,
+  getAnalyses,
+  getAnalysisById,
+} from '../data/store.js';
+import type { AnalysisFeedback } from '../services/analysis/types.js';
+
+const router = express.Router();
+
+router.use(optionalAuth);
+
+const MAX_UPLOAD_SIZE = 10 * 1024 * 1024; // 10MB（客户端压缩后通常 < 1MB）
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_UPLOAD_SIZE },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('只允许上传图片文件（image/*）'));
+    }
+  },
+});
+
+async function runAnalysis(imageBase64: string, req: Request, res: Response): Promise<void> {
+  try {
+    const result = await analyzeScreenshot(imageBase64);
+    result.userId = (req as any).user?.uid ?? undefined;
+    addAnalysis(result);
+
+    res.json({ success: true, data: result });
+  } catch (error: any) {
+    console.error('Analyze error:', error);
+    res.status(500).json({
+      success: false,
+      error: error?.message || '分析失败，请稍后重试',
+    });
+  }
+}
+
+router.post('/', (req: Request, res: Response): void => {
+  const { image } = req.body || {};
+  if (!image || typeof image !== 'string') {
+    res.status(400).json({ success: false, error: '缺少截图：请提供 image（base64 或 data URI）' });
+    return;
+  }
+  void runAnalysis(image, req, res);
+});
+
+// multipart 包装：multer 错误（超限/类型不符）转为 400
+router.post('/upload', (req: Request, res: Response, next: NextFunction): void => {
+  upload.single('file')(req, res, (err?: any) => {
+    if (err) {
+      res.status(400).json({ success: false, error: err?.message || '文件上传失败' });
+      return;
+    }
+    next();
+  });
+}, (req: Request, res: Response): void => {
+  if (!req.file || !req.file.buffer || req.file.buffer.length === 0) {
+    res.status(400).json({ success: false, error: '缺少文件：请使用 multipart 字段名 "file" 上传截图' });
+    return;
+  }
+  const base64 = req.file.buffer.toString('base64');
+  void runAnalysis(base64, req, res);
+});
+
+router.get('/', (req: Request, res: Response): void => {
+  const list = getAnalyses().map(a => ({
+    id: a.id,
+    createdAt: a.createdAt,
+    rivalAlias: a.dialog.rivalAlias,
+    stage: a.stage,
+    netScore: a.signals.netScore,
+    strategy: a.decision.strategy,
+    strategyLabel: a.decision.strategyLabel,
+    suggestionCount: a.suggestions.length,
+    mock: a.metadata.mock,
+  }));
+  res.json({ success: true, data: list });
+});
+
+router.get('/rules', (req: Request, res: Response): void => {
+  res.json({ success: true, data: listRules() });
+});
+
+router.get('/:id', (req: Request, res: Response): void => {
+  const analysis = getAnalysisById(req.params.id);
+  if (!analysis) {
+    res.status(404).json({ success: false, error: '分析记录不存在' });
+    return;
+  }
+  res.json({ success: true, data: analysis });
+});
+
+router.delete('/:id', (req: Request, res: Response): void => {
+  if (!getAnalysisById(req.params.id)) {
+    res.status(404).json({ success: false, error: '分析记录不存在' });
+    return;
+  }
+  deleteAnalysis(req.params.id);
+  res.json({ success: true });
+});
+
+router.post('/:id/feedback', (req: Request, res: Response): void => {
+  const analysis = getAnalysisById(req.params.id);
+  if (!analysis) {
+    res.status(404).json({ success: false, error: '分析记录不存在' });
+    return;
+  }
+
+  const { suggestionIndex, outcome, editedText, comment } = req.body || {};
+  if (!Number.isInteger(suggestionIndex) || suggestionIndex < 0 || suggestionIndex >= analysis.suggestions.length) {
+    res.status(400).json({ success: false, error: 'suggestionIndex 无效' });
+    return;
+  }
+  if (!['adopted', 'edited', 'rejected'].includes(outcome)) {
+    res.status(400).json({ success: false, error: "outcome 必须是 'adopted' | 'edited' | 'rejected'" });
+    return;
+  }
+
+  const feedback: AnalysisFeedback = {
+    analysisId: analysis.id,
+    suggestionIndex,
+    outcome,
+    editedText: outcome === 'edited' ? String(editedText ?? '') : undefined,
+    comment: comment ? String(comment) : undefined,
+    createdAt: new Date(),
+  };
+  addFeedback(feedback);
+  console.log(`[feedback] ${feedback.outcome} on analysis ${feedback.analysisId}#${feedback.suggestionIndex}`);
+
+  res.json({ success: true, data: feedback });
+});
+
+export default router;

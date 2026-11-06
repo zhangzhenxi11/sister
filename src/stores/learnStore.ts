@@ -5,7 +5,7 @@ export interface LearningMaterial {
   id: string;
   title: string;
   description: string;
-  type: 'video' | 'audio' | 'image' | 'text';
+  type: 'video' | 'audio' | 'image' | 'text' | 'pdf';
   status: 'pending' | 'processing' | 'completed' | 'failed';
   summary?: string;
   createdAt: Date;

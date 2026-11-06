@@ -1,50 +1,43 @@
 import express, { type Request, type Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { generateResponse, type ChatMessage } from '../services/chat.js';
+import { analyzeImage } from '../services/multimodal.js';
+import { createPersonaAgent } from '../services/personaAgent.js';
+import { getConversations, getPersonaById, persistConversations } from '../data/store.js';
 
 const router = express.Router();
 
-interface Conversation {
-  id: string;
-  title: string;
-  messages: ChatMessage[];
-  personaId?: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-const conversations: Conversation[] = [];
+// 会话持久化：重启不丢（data/conversations.json）
+const conversations = getConversations();
 
 router.post('/chat', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { message, conversationId, personaId, useRag = true } = req.body;
-    
+    const { message, conversationId, personaId, useRag = true, image } = req.body;
+
     console.log('=== /api/chat/chat ===');
     console.log('message:', message);
     console.log('personaId:', personaId);
     console.log('useRag:', useRag);
+    console.log('hasImage:', image ? 'yes (base64)' : 'no');
 
-    if (!message) {
-      res.status(400).json({ success: false, error: 'Message is required' });
+    if (!message && !image) {
+      res.status(400).json({ success: false, error: 'Message or image is required' });
       return;
     }
 
-    let conversation: Conversation | undefined;
-
-    if (conversationId) {
-      conversation = conversations.find(c => c.id === conversationId);
-    }
+    let conversation = conversations.find(c => c.id === conversationId);
 
     if (!conversation) {
       conversation = {
         id: uuidv4(),
-        title: message.slice(0, 30) + '...',
+        title: (message || '图片对话').slice(0, 30) + '...',
         messages: [],
         personaId,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
       conversations.push(conversation);
+      persistConversations();
     }
 
     const history = conversation.messages.map(m => ({
@@ -52,48 +45,69 @@ router.post('/chat', async (req: Request, res: Response): Promise<void> => {
       content: m.content,
     }));
 
+    let imageAnalysis = '';
+    if (image) {
+      try {
+        imageAnalysis = await analyzeImage(
+          image,
+          '请详细描述这张图片的内容，包括人物、场景、动作、表情等细节。'
+        );
+        console.log('Image analysis result:', imageAnalysis);
+      } catch (imgError) {
+        console.error('Image analysis failed:', imgError);
+        imageAnalysis = '[图片分析失败，无法识别图片内容]';
+      }
+    }
+
+    const fullMessage = req.file
+      ? `${message || '请分析这张图片'}\n\n[用户上传了一张图片]`
+      : message;
+
     let response: string;
 
     if (personaId) {
-      try {
-        const personaResponse = await fetch(`/api/learn/persona/${personaId}/chat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message,
+      const persona = getPersonaById(personaId);
+      if (persona) {
+        try {
+          // 同进程直调 PersonaAgent（原实现用相对 URL 自 fetch，Node 不支持，必然失败回退）
+          const agent = createPersonaAgent(persona as any);
+          const agentInput = imageAnalysis
+            ? `${message || '请分析这张图片'}\n\n[图片分析结果] ${imageAnalysis}`
+            : (message || '请分析这张图片');
+
+          const agentResult = await agent.process({
+            userMessage: agentInput,
             conversationHistory: history.slice(-5),
-            useRag: true,  // Always use RAG when using persona
-          }),
-        });
-        
-        const personaData = await personaResponse.json();
-        
-        if (personaData.success) {
-          response = personaData.data.response;
-        } else {
-          response = await generateResponse(message, history, {
-            useRag,
-            ragLimit: 3,
+            useRag: true,
           });
+
+          response = agentResult.success
+            ? agentResult.response
+            : await generateResponse(fullMessage, history, { useRag, ragLimit: 3 });
+        } catch (agentError) {
+          console.error('PersonaAgent 调用失败，回退通用回复:', agentError);
+          response = await generateResponse(fullMessage, history, { useRag, ragLimit: 3 });
         }
-      } catch {
-        response = await generateResponse(message, history, {
-          useRag,
-          ragLimit: 3,
-        });
+      } else {
+        response = await generateResponse(fullMessage, history, { useRag, ragLimit: 3 });
       }
     } else {
-      response = await generateResponse(message, history, {
+      const enhancedMessage = imageAnalysis
+        ? `${fullMessage}\n\n[图片分析：${imageAnalysis}]`
+        : fullMessage;
+
+      response = await generateResponse(enhancedMessage, history, {
         useRag,
         ragLimit: 3,
       });
     }
 
     conversation.messages.push(
-      { role: 'user', content: message },
+      { role: 'user', content: message || '[发送了一张图片]' },
       { role: 'assistant', content: response }
     );
     conversation.updatedAt = new Date();
+    persistConversations();
 
     res.json({
       success: true,
@@ -101,13 +115,14 @@ router.post('/chat', async (req: Request, res: Response): Promise<void> => {
         response,
         conversationId: conversation.id,
         title: conversation.title,
+        imageAnalysis,
       },
     });
   } catch (error: any) {
     console.error('Chat error:', error);
-    
+
     let errorMessage = '抱歉，我现在无法回复。请稍后再试。';
-    
+
     if (error.code === 'ETIMEDOUT' || error.cause?.code === 'ETIMEDOUT') {
       errorMessage = '网络连接超时，无法访问AI服务。请检查网络设置。';
     } else if (error.status === 401) {
@@ -117,7 +132,7 @@ router.post('/chat', async (req: Request, res: Response): Promise<void> => {
     } else if (error.message?.includes('API Key')) {
       errorMessage = error.message;
     }
-    
+
     res.status(500).json({ success: false, error: errorMessage });
   }
 });
@@ -155,6 +170,7 @@ router.delete('/conversations/:id', (req: Request, res: Response): void => {
   }
 
   conversations.splice(index, 1);
+  persistConversations();
   res.json({ success: true });
 });
 

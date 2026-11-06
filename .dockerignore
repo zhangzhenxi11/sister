@@ -1,0 +1,16 @@
+node_modules
+dist
+android
+ios
+harmonyos-shell
+scripts
+.workbuddy
+.git
+.env
+.env.*
+!.env.example
+uploads
+data
+*.log
+*.md
+!README.md

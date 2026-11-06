@@ -1,0 +1,82 @@
+# 回复思路规则引擎配置
+# 决策原则：按 priority 降序，命中即返回（首个匹配优先）
+# 可用事实（facts）：
+#   netScore    净评分（ioiScore - iodScore）
+#   ioiScore    IOI 加权总分
+#   iodScore    IOD 加权总分
+#   iodStreak   尾部连续 IOD 轮数
+#   stage       关系阶段（陌生/破冰/熟悉/升温/暧昧/确立）
+#   defenseLevel 对方防御等级（low/medium/high）
+# 操作符：gt / gte / lt / lte / eq / neq / in
+# when 为空对象 {} 表示默认规则（兜底）
+
+version: 1
+
+rules:
+  - id: iod-streak-retreat
+    priority: 100
+    description: 连续 IOD ≥ 3，进入冷冻
+    when:
+      all:
+        - { fact: iodStreak, op: gte, value: 3 }
+    then:
+      strategy: retreat_freeze
+      tactics: [冷冻, 稀缺展示]
+      action: 断联冷冻 48-72h，停止一切主动，仅做自我展示
+
+  - id: iod-weak-unload
+    priority: 90
+    description: 净评分为负但未达冷冻线，卸防撤退
+    when:
+      all:
+        - { fact: netScore, op: lte, value: -1 }
+    then:
+      strategy: retreat_unload
+      tactics: [框架控制, 反筛选]
+      action: 停止推进，用幽默化解压迫感，反筛选对方投入度
+
+  - id: defense-first-unload
+    priority: 85
+    description: 对方防御等级高时，任何推进前必须先卸防
+    when:
+      all:
+        - { fact: defenseLevel, op: eq, value: high }
+        - { fact: netScore, op: lt, value: 2 }
+    then:
+      strategy: retreat_unload
+      tactics: [冷读, 卸防]
+      action: 先共情卸防，暂不推进，降低需求感
+
+  - id: ioi-strong-advance
+    priority: 80
+    description: IOI 强且关系已升温/暧昧，进攻推进
+    when:
+      all:
+        - { fact: ioiScore, op: gte, value: 3 }
+        - { fact: stage, op: in, value: [升温, 暧昧] }
+    then:
+      strategy: advance
+      tactics: [推拉, 升级术]
+      action: 升级话题，发出模糊邀约
+      requireCitation: true
+
+  - id: ioi-present-advance
+    priority: 70
+    description: 净评分显著为正，适度推进试探
+    when:
+      all:
+        - { fact: netScore, op: gte, value: 3 }
+    then:
+      strategy: advance
+      tactics: [推拉]
+      action: 适度推进，试探升级
+      requireCitation: true
+
+  - id: default-hold
+    priority: 0
+    description: 默认：观察蓄能
+    when: {}
+    then:
+      strategy: hold
+      tactics: [故事植入, 冷读]
+      action: 延续话题，做价值展示，不急着推进

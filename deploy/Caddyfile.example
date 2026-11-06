@@ -1,0 +1,16 @@
+# 复制为 deploy/Caddyfile，把域名替换为你的域名，然后：
+#   docker compose --profile tls up -d
+#
+# app 容器同时托管前端静态资源与 /api，因此单条 reverse_proxy 即可。
+
+your-domain.com {
+	reverse_proxy app:3001
+
+	# 可选：压缩与缓存
+	encode zstd gzip
+	@static path /assets/*
+	handle @static {
+		header Cache-Control "public, max-age=31536000, immutable"
+		reverse_proxy app:3001
+	}
+}
