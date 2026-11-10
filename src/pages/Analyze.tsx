@@ -283,7 +283,7 @@ export default function Analyze() {
     setSteps([]);
     setError('');
     try {
-      const data = await analyzeWithStream(files, token, e => {
+      const data = await analyzeWithStream(files, e => {
         setSteps(prev => {
           const next = prev.filter(s => s.step !== e.step);
           next.push(e);

@@ -3,6 +3,7 @@
  * 逐步回调流水线进度，最终 resolve AnalysisResult。
  */
 import { compressImage, blobToBase64 } from './imageCompress';
+import { authFetch } from '@/stores/authStore';
 import type { AnalysisResult } from '../../api/services/analysis/types';
 
 export interface StepEvent {
@@ -13,7 +14,6 @@ export interface StepEvent {
 
 export async function analyzeWithStream(
   files: File[],
-  token: string | null,
   onStep: (e: StepEvent) => void,
 ): Promise<AnalysisResult> {
   if (files.length === 0) {
@@ -26,14 +26,10 @@ export async function analyzeWithStream(
     images.push(await blobToBase64(compressed));
   }
 
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-
-  const res = await fetch('/api/analyze/stream', {
+  // authFetch 自动携带登录态与设置页配置的 LLM 覆盖头（x-llm-key 等）
+  const res = await authFetch('/api/analyze/stream', {
     method: 'POST',
-    headers,
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ images }),
   });
   if (!res.ok) {
