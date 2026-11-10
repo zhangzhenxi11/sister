@@ -69,14 +69,21 @@ export async function chatJSON<T>(opts: JSONCallOptions<T>): Promise<JSONCallRes
     const reasoning = typeof msg?.reasoning_content === 'string' ? msg.reasoning_content : '';
     const parsed = extractJson(content) ?? (reasoning ? extractJson(reasoning) : null);
     if (parsed === null) {
+      const finishReason = response.choices[0]?.finish_reason;
+      // 输出被截断（推理模型思考耗光预算）：加倍 maxTokens 重试一次（上限 8000）
+      if (finishReason === 'length') {
+        const current = opts.maxTokens ?? 1500;
+        if (current < 8000) {
+          const bumped = Math.min(current * 2, 8000);
+          console.warn(`[${opts.label}] 输出截断（finish_reason=length），加倍重试 maxTokens ${current} -> ${bumped}`);
+          return chatJSON({ ...opts, maxTokens: bumped });
+        }
+      }
       console.error(
-        `[${opts.label}] LLM 未返回合法 JSON（finish_reason=${response.choices[0]?.finish_reason}）:`,
+        `[${opts.label}] LLM 未返回合法 JSON（finish_reason=${finishReason}）:`,
         `content="${content.slice(0, 300)}" reasoning="${reasoning.slice(0, 200)}"`,
       );
       throw new Error('LLM 未返回合法 JSON');
-    }
-    if (response.choices[0]?.finish_reason === 'length') {
-      console.warn(`[${opts.label}] 输出被 max_tokens 截断（finish_reason=length，maxTokens=${opts.maxTokens}）`);
     }
     return { data: parsed as T, mock: false };
   } catch (error: any) {
