@@ -38,13 +38,18 @@ export async function analyzeScreenshots(
 ): Promise<AnalysisResult> {
   const start = Date.now();
   let usedMock = false;
+  const degradedSteps: string[] = [];
   const step = (n: number, status: StepStatus) =>
     onStep?.(n, PIPELINE_STEPS[n - 1] || `步骤 ${n}`, status);
+  const markMock = (n: number, m: boolean) => {
+    if (m) degradedSteps.push(PIPELINE_STEPS[n - 1] || `步骤 ${n}`);
+  };
 
   // 1. 识图解析（支持多图合并）
   step(1, 'running');
   const parsed = await parseScreenshots(images);
   usedMock = usedMock || parsed.mock;
+  markMock(1, parsed.mock);
   step(1, 'done');
   console.log(`[analysis] dialog parsed: ${parsed.dialog.turns.length} turns from ${images.length} image(s) (mock=${parsed.mock})`);
 
@@ -52,6 +57,7 @@ export async function analyzeScreenshots(
   step(2, 'running');
   const profiled = await profileRival(parsed.dialog);
   usedMock = usedMock || profiled.mock;
+  markMock(2, profiled.mock);
   step(2, 'done');
   console.log(`[analysis] profile: defense=${profiled.profile.defenseLevel} (mock=${profiled.mock})`);
 
@@ -59,6 +65,7 @@ export async function analyzeScreenshots(
   step(3, 'running');
   const staged = await assessStage(parsed.dialog, profiled.profile);
   usedMock = usedMock || staged.mock;
+  markMock(3, staged.mock);
   step(3, 'done');
   console.log(`[analysis] stage: ${staged.stage} (mock=${staged.mock})`);
 
@@ -66,6 +73,7 @@ export async function analyzeScreenshots(
   step(4, 'running');
   const signaled = await detectSignals(parsed.dialog);
   usedMock = usedMock || signaled.mock;
+  markMock(4, signaled.mock);
   step(4, 'done');
   console.log(`[analysis] signals: net=${signaled.summary.netScore} streak=${signaled.summary.iodStreak} (mock=${signaled.mock})`);
 
@@ -90,6 +98,8 @@ export async function analyzeScreenshots(
     decision,
   });
   usedMock = usedMock || replies.mock;
+  markMock(6, replies.mock);
+  markMock(7, replies.mock);
   step(6, 'done');
   step(7, 'running');
   step(7, 'done');
@@ -108,6 +118,7 @@ export async function analyzeScreenshots(
     metadata: {
       model: getModel(),
       mock: usedMock,
+      degradedSteps: degradedSteps.length > 0 ? degradedSteps : undefined,
       durationMs: Date.now() - start,
     },
   };

@@ -42,15 +42,17 @@ function ResultView({ result }: { result: AnalysisResult }) {
 
   return (
     <div className="space-y-4">
-      {/* 降级提示：LLM 不可用时的明确说明 */}
+      {/* 降级提示：仅列出真实降级的环节，其余为真实分析 */}
       {result.metadata.mock && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
           <p className="text-xs font-medium text-amber-800">
-            大模型调用失败，当前为降级模式
+            部分环节调用大模型失败，已降级为演示数据
           </p>
           <p className="text-[11px] text-amber-700 mt-1 leading-relaxed">
-            下方「识别到的对话」是本地 OCR 真实识别结果；策略 / 侧写 / 话术为演示数据。
-            请到「设置 → 大模型配置」检查 Key 与 Base URL 是否匹配。
+            {result.metadata.degradedSteps?.length
+              ? `降级环节：${result.metadata.degradedSteps.join('、')}。其余内容（含识别到的对话）为真实分析结果。`
+              : '「识别到的对话」为本地 OCR 真实识别结果；其余为演示数据。'}
+            可到「设置 → 大模型配置」检查 Key 与 Base URL。
           </p>
         </div>
       )}

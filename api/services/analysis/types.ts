@@ -138,6 +138,8 @@ export interface AnalysisResult {
   metadata: {
     model: string;
     mock: boolean;
+    /** 降级为演示数据的环节名称列表（mock=true 时有值） */
+    degradedSteps?: string[];
     durationMs: number;
   };
 }
