@@ -17,6 +17,7 @@ import learnRoutes from './routes/learn.js'
 import personaRoutes from './routes/persona.js'
 import chatRoutes from './routes/chat.js'
 import analyzeRoutes from './routes/analyze.js'
+import { withLlmOverride } from './services/llmContext.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -37,6 +38,26 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 app.use((req: Request, res: Response, next: NextFunction): void => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   next();
+});
+
+/**
+ * 请求级 LLM 配置覆盖：x-llm-key / x-llm-base-url / x-llm-model
+ * 设置页配置的自定义大模型凭据在此注入本请求链路。
+ */
+app.use((req: Request, _res: Response, next: NextFunction): void => {
+  const override: { apiKey?: string; baseURL?: string; model?: string } = {};
+  const key = req.headers['x-llm-key'];
+  const baseURL = req.headers['x-llm-base-url'];
+  const model = req.headers['x-llm-model'];
+  if (typeof key === 'string' && key.trim()) override.apiKey = key.trim();
+  if (typeof baseURL === 'string' && baseURL.trim()) override.baseURL = baseURL.trim();
+  if (typeof model === 'string' && model.trim()) override.model = model.trim();
+
+  if (Object.keys(override).length === 0) {
+    next();
+    return;
+  }
+  withLlmOverride(override, () => next());
 });
 
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));

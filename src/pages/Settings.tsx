@@ -1,9 +1,29 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Heart, MessageCircle, Sparkles, Moon, Sun } from 'lucide-react';
+import { ArrowLeft, Heart, MessageCircle, Sparkles, Moon, Sun, KeyRound, Eye, EyeOff, Check, RotateCcw } from 'lucide-react';
 import { useSettingsStore } from '@/stores/settingsStore';
 
 export default function Settings() {
-  const { preferences, setPreferences, theme, setTheme } = useSettingsStore();
+  const { preferences, setPreferences, theme, setTheme, apiKey, llmBaseUrl, llmModel, setLlmConfig } = useSettingsStore();
+
+  const [keyInput, setKeyInput] = useState(apiKey);
+  const [baseUrlInput, setBaseUrlInput] = useState(llmBaseUrl);
+  const [modelInput, setModelInput] = useState(llmModel);
+  const [showKey, setShowKey] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const handleSaveLlm = () => {
+    setLlmConfig({ apiKey: keyInput, baseUrl: baseUrlInput, model: modelInput });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  const handleResetLlm = () => {
+    setKeyInput('');
+    setBaseUrlInput('');
+    setModelInput('');
+    setLlmConfig({ apiKey: '', baseUrl: '', model: '' });
+  };
 
   const relationshipOptions = [
     { value: 'single', label: '单身' },
@@ -36,6 +56,78 @@ export default function Settings() {
       </header>
 
       <div className="max-w-md mx-auto p-4 space-y-4">
+        {/* 大模型配置 */}
+        <div className="bg-white rounded-2xl shadow-lg p-4">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center">
+              <KeyRound className="w-5 h-5 text-amber-500" />
+            </div>
+            <h2 className="font-semibold text-gray-800">大模型配置</h2>
+          </div>
+          <p className="text-[11px] text-gray-400 mb-3">
+            填写后所有 AI 功能（截图分析、聊天、学习）使用你的 Key；留空则使用服务器默认配置。Key 只保存在本机浏览器。
+          </p>
+
+          <label className="block text-xs text-gray-500 mb-1">API Key</label>
+          <div className="relative mb-3">
+            <input
+              type={showKey ? 'text' : 'password'}
+              value={keyInput}
+              onChange={e => setKeyInput(e.target.value)}
+              placeholder="sk-..."
+              className="w-full px-4 py-2.5 bg-gray-100 rounded-xl pr-11 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-pink-300"
+            />
+            <button
+              onClick={() => setShowKey(!showKey)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+            >
+              {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </div>
+
+          <label className="block text-xs text-gray-500 mb-1">Base URL（可选）</label>
+          <input
+            type="text"
+            value={baseUrlInput}
+            onChange={e => setBaseUrlInput(e.target.value)}
+            placeholder="https://api.deepseek.com/v1"
+            className="w-full px-4 py-2.5 bg-gray-100 rounded-xl text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-pink-300 mb-3"
+          />
+
+          <label className="block text-xs text-gray-500 mb-1">模型名（可选）</label>
+          <input
+            type="text"
+            value={modelInput}
+            onChange={e => setModelInput(e.target.value)}
+            placeholder="deepseek-chat / gpt-4o-mini ..."
+            className="w-full px-4 py-2.5 bg-gray-100 rounded-xl text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-pink-300 mb-3"
+          />
+
+          <div className="flex gap-2">
+            <button
+              onClick={handleSaveLlm}
+              className={`flex-1 py-2.5 rounded-xl text-sm font-medium text-white transition-colors ${
+                saved ? 'bg-emerald-500' : 'bg-gradient-to-r from-pink-500 to-purple-500'
+              }`}
+            >
+              {saved ? '已保存' : '保存配置'}
+            </button>
+            {(apiKey || keyInput) && (
+              <button
+                onClick={handleResetLlm}
+                className="px-4 py-2.5 rounded-xl bg-gray-100 text-gray-500 text-sm flex items-center gap-1"
+              >
+                <RotateCcw className="w-4 h-4" /> 恢复默认
+              </button>
+            )}
+          </div>
+          {apiKey && (
+            <p className="flex items-center gap-1 text-[11px] text-emerald-600 mt-2">
+              <Check className="w-3 h-3" /> 自定义 Key 生效中
+            </p>
+          )}
+        </div>
+
         <div className="bg-white rounded-2xl shadow-lg p-4">
           <div className="flex items-center gap-3 mb-4">
             <div className="w-10 h-10 bg-pink-100 rounded-xl flex items-center justify-center">

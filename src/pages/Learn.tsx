@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, Upload, FileText, Video, Music, Image, Trash2, Brain, Play, Check, Sparkles, File, RefreshCw, FolderOpen, Clock, CheckCircle, XCircle } from 'lucide-react';
+import { authFetch } from '@/stores/authStore';
 import { useLearnStore, type LearningMaterial, type Persona } from '@/stores/learnStore';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -42,7 +43,7 @@ export default function Learn() {
 
   const fetchLocalFiles = async () => {
     try {
-      const response = await fetch('/api/learn/local-files');
+      const response = await authFetch('/api/learn/local-files');
       const data = await response.json();
       if (data.success) {
         setLocalFiles(data.data);
@@ -54,7 +55,7 @@ export default function Learn() {
 
   const fetchMaterials = async () => {
     try {
-      const response = await fetch('/api/learn/materials');
+      const response = await authFetch('/api/learn/materials');
       const data = await response.json();
       if (data.success && data.data) {
         data.data.forEach((m: any) => {
@@ -101,7 +102,7 @@ export default function Learn() {
         setUploadProgress(prev => Math.min(prev + 10, 90));
       }, 200);
 
-      const response = await fetch('/api/learn/upload', {
+      const response = await authFetch('/api/learn/upload', {
         method: 'POST',
         body: formData,
       });
@@ -139,7 +140,7 @@ export default function Learn() {
     setIsCreating(true);
 
     try {
-      const response = await fetch('/api/learn/persona', {
+      const response = await authFetch('/api/learn/persona', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -182,7 +183,7 @@ export default function Learn() {
 
   const handleActivatePersona = async (persona: Persona) => {
     try {
-      await fetch(`/api/learn/persona/${persona.id}/activate`, {
+      await authFetch(`/api/learn/persona/${persona.id}/activate`, {
         method: 'PUT',
       });
     } catch (error) {
@@ -193,7 +194,7 @@ export default function Learn() {
 
   const handleReflection = async (personaId: string) => {
     try {
-      const response = await fetch(`/api/learn/persona/${personaId}/reflect`, {
+      const response = await authFetch(`/api/learn/persona/${personaId}/reflect`, {
         method: 'POST',
       });
       const data = await response.json();

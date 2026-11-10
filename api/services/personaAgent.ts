@@ -1,9 +1,11 @@
 import { default as OpenAI } from 'openai';
+import { getLlmOverride } from './llmContext.js';
 
 function getOpenAI() {
+  const override = getLlmOverride();
   return new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-    baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
+    apiKey: override.apiKey || process.env.OPENAI_API_KEY,
+    baseURL: override.baseURL || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
   });
 }
 

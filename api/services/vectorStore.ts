@@ -1,5 +1,6 @@
 import { QdrantClient } from '@qdrant/js-client-rest';
 import { getMaterials } from '../data/store.js';
+import { getLlmOverride } from './llmContext.js';
 
 const qdrantHost = process.env.QDRANT_HOST || '127.0.0.1';
 const qdrantPort = parseInt(process.env.QDRANT_PORT || '6333');
@@ -121,15 +122,18 @@ export async function deleteVector(id: string): Promise<void> {
 
 async function getEmbedding(text: string): Promise<number[]> {
   const { default: OpenAI } = await import('openai');
-  
-  const baseURL = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
-  
+
+  const override = getLlmOverride();
+  const baseURL = override.baseURL || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
+
   const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+    apiKey: override.apiKey || process.env.OPENAI_API_KEY,
     baseURL: baseURL,
   });
 
-  const embeddingModel = process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small';
+  const embeddingModel = override.model && override.model.includes('embed')
+    ? override.model
+    : (process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small');
 
   try {
     const response = await openai.embeddings.create({

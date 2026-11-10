@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { useSettingsStore } from './settingsStore';
 
 export interface AuthUser {
   id: string;
@@ -28,12 +29,19 @@ export const useAuthStore = create<AuthState>()(
   )
 );
 
-/** 带 Bearer 头的 fetch 封装：未登录时等同普通 fetch */
+/** 带 Bearer 头 + LLM 覆盖头的 fetch：登录态与自定义大模型凭据自动携带 */
 export async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const token = useAuthStore.getState().token;
+  const { apiKey, llmBaseUrl, llmModel } = useSettingsStore.getState();
   const headers = new Headers(options.headers);
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
+  }
+  // 设置页配置的大模型凭据：仅当填写 Key 时启用覆盖（BaseURL/模型可选，缺省用服务端默认）
+  if (apiKey) {
+    headers.set('x-llm-key', apiKey);
+    if (llmBaseUrl) headers.set('x-llm-base-url', llmBaseUrl);
+    if (llmModel) headers.set('x-llm-model', llmModel);
   }
   return fetch(url, { ...options, headers });
 }

@@ -5,18 +5,20 @@
  * - MOCK_LLM=true 时不发起真实调用，便于离线开发与冒烟测试。
  */
 import { default as OpenAI } from 'openai';
+import { getLlmOverride } from '../llmContext.js';
 
 export const MOCK_MODE = process.env.MOCK_LLM === 'true';
 
 function getOpenAI(): OpenAI {
+  const override = getLlmOverride();
   return new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-    baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
+    apiKey: override.apiKey || process.env.OPENAI_API_KEY,
+    baseURL: override.baseURL || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
   });
 }
 
 export function getModel(): string {
-  return process.env.OPENAI_MODEL || 'gpt-4o-mini';
+  return getLlmOverride().model || process.env.OPENAI_MODEL || 'gpt-4o-mini';
 }
 
 function extractJson(text: string): unknown | null {

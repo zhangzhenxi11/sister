@@ -4,6 +4,7 @@ import ffmpeg from 'fluent-ffmpeg';
 import { default as Tesseract } from 'tesseract.js';
 import { default as OpenAI } from 'openai';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import { getLlmOverride } from './llmContext.js';
 
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
@@ -20,9 +21,10 @@ async function parsePdf(filePath: string): Promise<{ text: string; numpages: num
 }
 
 function getOpenAI() {
+  const override = getLlmOverride();
   return new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-    baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
+    apiKey: override.apiKey || process.env.OPENAI_API_KEY,
+    baseURL: override.baseURL || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
   });
 }
 

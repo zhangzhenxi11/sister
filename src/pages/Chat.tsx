@@ -4,6 +4,7 @@ import { ArrowLeft, Send, Plus, Trash2, Settings, Sparkles, User, Check, Chevron
 import { useChatStore, type Message } from '@/stores/chatStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useLearnStore, type Persona } from '@/stores/learnStore';
+import { authFetch } from '@/stores/authStore';
 import { compressImage, blobToBase64 } from '@/lib/imageCompress';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -109,7 +110,7 @@ export default function Chat() {
         console.log('No image to upload');
       }
 
-      const response = await fetch('/api/chat/chat', {
+      const response = await authFetch('/api/chat/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

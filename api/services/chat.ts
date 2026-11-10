@@ -1,6 +1,7 @@
 import { default as OpenAI } from 'openai';
 import { searchSimilar } from './vectorStore.js';
 import { getMaterials } from '../data/store.js';
+import { getLlmOverride } from './llmContext.js';
 
 async function simpleSearchSimilar(query: string, limit: number): Promise<Array<{ id: string; content: string; score: number }>> {
   const materials = getMaterials();
@@ -23,9 +24,10 @@ async function simpleSearchSimilar(query: string, limit: number): Promise<Array<
 }
 
 function getOpenAI() {
+  const override = getLlmOverride();
   return new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-    baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
+    apiKey: override.apiKey || process.env.OPENAI_API_KEY,
+    baseURL: override.baseURL || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
   });
 }
 
