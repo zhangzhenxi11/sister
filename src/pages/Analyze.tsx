@@ -5,7 +5,7 @@ import {
   Check, ThumbsUp, ThumbsDown, ScanLine,
 } from 'lucide-react';
 import { useAuthStore, authFetch } from '@/stores/authStore';
-import { analyzeWithStream, type StepEvent } from '@/lib/analyzeStream';
+import { useAnalyzeStore } from '@/stores/analyzeStore';
 import LoginCard from '@/components/LoginCard';
 import type { AnalysisResult } from '../../api/services/analysis/types';
 
@@ -238,12 +238,11 @@ const MAX_IMAGES = 9;
 
 export default function Analyze() {
   const { token, user, clearAuth } = useAuthStore();
-  const [files, setFiles] = useState<File[]>([]);
-  const [previews, setPreviews] = useState<string[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const [steps, setSteps] = useState<StepEvent[]>([]);
-  const [error, setError] = useState('');
-  const [result, setResult] = useState<AnalysisResult | null>(null);
+  // 全局 store：切换路由不丢失进度，分析中离开页面结果也会写入
+  const {
+    files, previews, steps, uploading, result, error,
+    addFiles, removeAt, runAnalysis, setResult,
+  } = useAnalyzeStore();
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -269,66 +268,7 @@ export default function Analyze() {
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
-  }, []);
-
-  const addFiles = (incoming: File[]) => {
-    const valid = incoming.filter(f => {
-      if (!f.type.startsWith('image/')) {
-        setError('请选择图片文件');
-        return false;
-      }
-      return true;
-    });
-    if (valid.length === 0) return;
-    setError('');
-    setResult(null);
-    setFiles(prev => {
-      const next = [...prev, ...valid].slice(0, MAX_IMAGES);
-      if (prev.length + valid.length > MAX_IMAGES) {
-        setError(`最多支持 ${MAX_IMAGES} 张，已截取前 ${MAX_IMAGES} 张`);
-      }
-      // 生成预览
-      next.forEach((f, i) => {
-        if (i >= previews.length) {
-          const reader = new FileReader();
-          reader.onload = e => setPreviews(p => {
-            const copy = [...p];
-            copy[i] = e.target?.result as string;
-            return copy;
-          });
-          reader.readAsDataURL(f);
-        }
-      });
-      return next;
-    });
-  };
-
-  const removeAt = (index: number) => {
-    setFiles(prev => prev.filter((_, i) => i !== index));
-    setPreviews(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const handleAnalyze = async () => {
-    if (files.length === 0 || uploading) return;
-    setUploading(true);
-    setSteps([]);
-    setError('');
-    try {
-      const data = await analyzeWithStream(files, e => {
-        setSteps(prev => {
-          const next = prev.filter(s => s.step !== e.step);
-          next.push(e);
-          return next.sort((a, b) => a.step - b.step);
-        });
-      });
-      setResult(data);
-      loadHistory();
-    } catch (e: any) {
-      setError(e.message || '网络异常，请稍后重试');
-    } finally {
-      setUploading(false);
-    }
-  };
+  }, [addFiles]);
 
   const openHistory = async (id: string) => {
     try {
@@ -432,8 +372,14 @@ export default function Analyze() {
 
           {error && <p className="text-xs text-red-500 mt-3">{error}</p>}
 
-          {uploading && (
+          {(uploading || steps.length > 0) && (
             <div className="mt-4 bg-gray-50 rounded-xl p-3 space-y-2">
+              {uploading && steps.length === 0 && (
+                <div className="flex items-center gap-2">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-pink-500 flex-shrink-0" />
+                  <span className="text-xs text-gray-700">压缩上传中…</span>
+                </div>
+              )}
               {steps.map(s => (
                 <div key={s.step} className="flex items-center gap-2">
                   {s.status === 'running' ? (
@@ -450,12 +396,12 @@ export default function Analyze() {
           )}
 
           <button
-            onClick={handleAnalyze}
+            onClick={() => void runAnalysis()}
             disabled={files.length === 0 || uploading}
             className="mt-4 w-full py-3 rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 text-white font-medium disabled:opacity-40 flex items-center justify-center gap-2"
           >
             {uploading && <Loader2 className="w-4 h-4 animate-spin" />}
-            开始分析
+            {uploading ? '分析中（可切换页面）' : '开始分析'}
           </button>
         </div>
 
