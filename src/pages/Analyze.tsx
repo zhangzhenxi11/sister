@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft, ImagePlus, ClipboardPaste, X, LogOut, Loader2,
-  Check, ThumbsUp, ThumbsDown, ChevronDown, ChevronUp, ScanLine,
+  Check, ThumbsUp, ThumbsDown, ScanLine,
 } from 'lucide-react';
 import { useAuthStore, authFetch } from '@/stores/authStore';
 import { analyzeWithStream, type StepEvent } from '@/lib/analyzeStream';
@@ -22,7 +22,6 @@ const DEFENSE_LABELS: Record<string, string> = { low: '防御低', medium: '防�
 /* ---------------- 结果视图 ---------------- */
 function ResultView({ result }: { result: AnalysisResult }) {
   const [feedback, setFeedback] = useState<Record<number, 'adopted' | 'rejected'>>({});
-  const [showDialog, setShowDialog] = useState(false);
   const style = STRATEGY_STYLES[result.decision.strategy] || STRATEGY_STYLES.hold;
 
   const submitFeedback = async (index: number, outcome: 'adopted' | 'rejected') => {
@@ -43,6 +42,69 @@ function ResultView({ result }: { result: AnalysisResult }) {
 
   return (
     <div className="space-y-4">
+      {/* 降级提示：LLM 不可用时的明确说明 */}
+      {result.metadata.mock && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+          <p className="text-xs font-medium text-amber-800">
+            大模型调用失败，当前为降级模式
+          </p>
+          <p className="text-[11px] text-amber-700 mt-1 leading-relaxed">
+            下方「识别到的对话」是本地 OCR 真实识别结果；策略 / 侧写 / 话术为演示数据。
+            请到「设置 → 大模型配置」检查 Key 与 Base URL 是否匹配。
+          </p>
+        </div>
+      )}
+
+      {/* 识别到的对话（真实 OCR 内容，置顶展示） */}
+      <div className="bg-white rounded-2xl p-5 shadow-lg space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-gray-800">识别到的对话</h3>
+          <div className="flex gap-1.5">
+            <span className="text-[10px] bg-pink-50 text-pink-600 px-2 py-0.5 rounded-full">
+              {result.dialog.turns.length} 条
+            </span>
+            {result.dialog.sourceImageCount ? (
+              <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+                {result.dialog.sourceImageCount} 张截图
+              </span>
+            ) : null}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 text-xs text-gray-500">
+          <span className="text-pink-500">{result.dialog.userAlias}</span>
+          <span>×</span>
+          <span>{result.dialog.rivalAlias}</span>
+          {result.dialog.turns.some(t => t.speaker === 'unknown') && (
+            <span className="text-[10px] text-amber-500">（部分说话人待判定）</span>
+          )}
+        </div>
+        <div className="space-y-1.5 max-h-72 overflow-y-auto">
+          {result.dialog.turns.map((t, i) => (
+            <div key={i} className={`flex ${t.speaker === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <span className={`text-xs px-3 py-1.5 rounded-xl max-w-[80%] ${
+                t.speaker === 'user'
+                  ? 'bg-pink-100 text-pink-800'
+                  : t.speaker === 'rival'
+                    ? 'bg-gray-100 text-gray-700'
+                    : 'bg-amber-50 text-amber-700'
+              }`}>
+                {t.isMedia ? '[媒体] ' : ''}{t.text}
+                {t.timeHint ? <span className="text-[9px] opacity-60 ml-1">{t.timeHint}</span> : null}
+              </span>
+            </div>
+          ))}
+        </div>
+        {/* 原始 OCR 文本 */}
+        {result.dialog.rawText && (
+          <details className="text-xs">
+            <summary className="cursor-pointer text-gray-400 select-none">查看原始 OCR 文本</summary>
+            <pre className="mt-2 p-3 bg-gray-50 rounded-xl text-[11px] text-gray-500 whitespace-pre-wrap max-h-48 overflow-y-auto">
+              {result.dialog.rawText}
+            </pre>
+          </details>
+        )}
+      </div>
+
       {/* 策略决策 */}
       <div className={`rounded-2xl border bg-gradient-to-br p-5 ${style.bg}`}>
         <div className="flex items-center justify-between mb-2">
@@ -105,34 +167,6 @@ function ResultView({ result }: { result: AnalysisResult }) {
         )}
       </div>
 
-      {/* 对话还原 */}
-      <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
-        <button
-          onClick={() => setShowDialog(v => !v)}
-          className="w-full flex items-center justify-between p-4 text-left"
-        >
-          <h3 className="font-semibold text-gray-800">对话还原（{result.dialog.turns.length} 条）</h3>
-          {showDialog ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
-        </button>
-        {showDialog && (
-          <div className="px-4 pb-4 space-y-1.5 max-h-64 overflow-y-auto">
-            {result.dialog.turns.map((t, i) => (
-              <div key={i} className={`flex ${t.speaker === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <span className={`text-xs px-3 py-1.5 rounded-xl max-w-[80%] ${
-                  t.speaker === 'user'
-                    ? 'bg-pink-100 text-pink-800'
-                    : t.speaker === 'rival'
-                      ? 'bg-gray-100 text-gray-700'
-                      : 'bg-amber-50 text-amber-700'
-                }`}>
-                  {t.isMedia ? '[媒体] ' : ''}{t.text}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
       {/* 九术依据 */}
       {result.tactics.length > 0 && (
         <div className="bg-white rounded-2xl p-5 shadow-lg space-y-2">
@@ -187,9 +221,6 @@ function ResultView({ result }: { result: AnalysisResult }) {
         ))}
       </div>
 
-      {result.metadata.mock && (
-        <p className="text-center text-[10px] text-gray-300">开发模式：当前为模拟数据</p>
-      )}
     </div>
   );
 }
