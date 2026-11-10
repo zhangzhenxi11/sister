@@ -4,6 +4,7 @@ import { ArrowLeft, Send, Plus, Trash2, Settings, Sparkles, User, Check, Chevron
 import { useChatStore, type Message } from '@/stores/chatStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useLearnStore, type Persona } from '@/stores/learnStore';
+import { compressImage, blobToBase64 } from '@/lib/imageCompress';
 import { v4 as uuidv4 } from 'uuid';
 
 export default function Chat() {
@@ -98,8 +99,12 @@ export default function Chat() {
     try {
       let imageBase64 = null;
       if (imageToSend) {
-        console.log('Uploading image:', imageToSend.name, imageToSend.size, imageToSend.type);
-        imageBase64 = imagePreview;
+        console.log('Compressing image:', imageToSend.name, imageToSend.size, imageToSend.type);
+        const compressed = await compressImage(imageToSend);
+        const base64 = await blobToBase64(compressed);
+        // 保持 data URI 形式：后端识图逻辑按 data: 前缀走 OCR 路径
+        imageBase64 = `data:image/jpeg;base64,${base64}`;
+        console.log('Compressed size:', compressed.size);
       } else {
         console.log('No image to upload');
       }

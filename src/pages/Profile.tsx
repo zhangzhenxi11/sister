@@ -1,19 +1,12 @@
-import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, User, Key, Settings, LogOut, Eye, EyeOff, AlertCircle } from 'lucide-react';
+import { ArrowLeft, User, Settings, LogOut, Phone, CalendarDays } from 'lucide-react';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { useAuthStore } from '@/stores/authStore';
+import LoginCard from '@/components/LoginCard';
 
 export default function Profile() {
-  const { apiKey, setApiKey, preferences } = useSettingsStore();
-  const [showKey, setShowKey] = useState(false);
-  const [inputKey, setInputKey] = useState(apiKey);
-  const [saved, setSaved] = useState(false);
-
-  const handleSaveKey = () => {
-    setApiKey(inputKey);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
+  const { preferences } = useSettingsStore();
+  const { token, user, clearAuth } = useAuthStore();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50">
@@ -25,61 +18,34 @@ export default function Profile() {
       </header>
 
       <div className="max-w-md mx-auto p-4 space-y-4">
-        <div className="bg-white rounded-2xl shadow-lg p-6 text-center">
-          <div className="w-20 h-20 bg-gradient-to-br from-pink-400 to-purple-500 rounded-full flex items-center justify-center mx-auto mb-4">
-            <User className="w-10 h-10 text-white" />
-          </div>
-          <h2 className="text-xl font-semibold text-gray-800">情感AI用户</h2>
-          <p className="text-gray-500 text-sm">免费用户</p>
-        </div>
-
-        <div className="bg-white rounded-2xl shadow-lg p-4">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
-              <Key className="w-5 h-5 text-blue-500" />
+        {/* 账号卡片 */}
+        {token && user ? (
+          <div className="bg-white rounded-2xl shadow-lg p-6">
+            <div className="flex items-center gap-4">
+              <div className="w-16 h-16 bg-gradient-to-br from-pink-400 to-purple-500 rounded-full flex items-center justify-center flex-shrink-0">
+                <User className="w-8 h-8 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-lg font-semibold text-gray-800 truncate">{user.nickname}</h2>
+                <div className="flex items-center gap-1.5 text-gray-500 text-sm mt-0.5">
+                  <Phone className="w-3.5 h-3.5" />
+                  {user.phone}
+                </div>
+              </div>
             </div>
-            <h2 className="font-semibold text-gray-800">API Key 设置</h2>
+            <div className="flex items-center gap-1.5 text-xs text-gray-400 mt-4">
+              <CalendarDays className="w-3.5 h-3.5" />
+              注册于 {new Date(user.createdAt).toLocaleDateString('zh-CN')}
+            </div>
           </div>
+        ) : (
+          <LoginCard />
+        )}
 
-          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 mb-4 flex items-start gap-2">
-            <AlertCircle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
-            <p className="text-xs text-yellow-700">
-              API Key 仅保存在您的浏览器本地，不会上传到服务器。请确保您有 OpenAI 账户余额。
-            </p>
-          </div>
-
-          <div className="relative">
-            <input
-              type={showKey ? 'text' : 'password'}
-              value={inputKey}
-              onChange={(e) => setInputKey(e.target.value)}
-              placeholder="sk-..."
-              className="w-full px-4 py-3 bg-gray-100 rounded-xl pr-12 text-gray-800 focus:outline-none focus:ring-2 focus:ring-pink-300"
-            />
-            <button
-              onClick={() => setShowKey(!showKey)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-gray-400"
-            >
-              {showKey ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-            </button>
-          </div>
-
-          <button
-            onClick={handleSaveKey}
-            disabled={inputKey === apiKey}
-            className={`w-full mt-3 py-3 rounded-xl font-medium transition-colors ${
-              saved
-                ? 'bg-green-500 text-white'
-                : 'bg-gradient-to-r from-pink-500 to-purple-500 text-white disabled:opacity-50'
-            }`}
-          >
-            {saved ? '已保存 ✓' : '保存 API Key'}
-          </button>
-        </div>
-
+        {/* 当前设置 */}
         <div className="bg-white rounded-2xl shadow-lg p-4">
           <h2 className="font-semibold text-gray-800 mb-3">当前设置</h2>
-          
+
           <div className="space-y-3">
             <div className="flex justify-between items-center py-2 border-b border-gray-100">
               <span className="text-gray-600">恋爱状态</span>
@@ -90,7 +56,7 @@ export default function Profile() {
                 {preferences.relationshipStatus === 'married' && '已婚'}
               </span>
             </div>
-            
+
             <div className="flex justify-between items-center py-2 border-b border-gray-100">
               <span className="text-gray-600">AI性格</span>
               <span className="text-gray-800 font-medium">
@@ -99,7 +65,7 @@ export default function Profile() {
                 {preferences.aiStyle === 'humorous' && '幽默型'}
               </span>
             </div>
-            
+
             <div className="flex justify-between items-center py-2">
               <span className="text-gray-600">兴趣话题</span>
               <span className="text-gray-800 font-medium">{preferences.interests.length} 个</span>
@@ -116,12 +82,15 @@ export default function Profile() {
             <span className="text-gray-800">偏好设置</span>
           </Link>
 
-          <button
-            className="w-full flex items-center gap-3 p-4 bg-white rounded-xl shadow hover:shadow-md transition-shadow text-left text-red-500"
-          >
-            <LogOut className="w-5 h-5" />
-            <span>退出登录</span>
-          </button>
+          {token && (
+            <button
+              onClick={clearAuth}
+              className="w-full flex items-center gap-3 p-4 bg-white rounded-xl shadow hover:shadow-md transition-shadow text-left text-red-500"
+            >
+              <LogOut className="w-5 h-5" />
+              <span>退出登录</span>
+            </button>
+          )}
         </div>
 
         <p className="text-center text-xs text-gray-400 mt-4">

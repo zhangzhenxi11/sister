@@ -23,6 +23,7 @@ import {
   deleteAnalysis,
   getAnalyses,
   getAnalysisById,
+  getFeedback,
 } from '../data/store.js';
 import type { AnalysisFeedback } from '../services/analysis/types.js';
 
@@ -86,6 +87,45 @@ router.post('/upload', (req: Request, res: Response, next: NextFunction): void =
   void runAnalysis(base64, req, res);
 });
 
+/**
+ * SSE 流式分析：逐步推送流水线进度（event: step），最终推送结果（event: done）。
+ * 前端压缩后 base64 走 JSON 提交（EventSource 不支持 POST，用 fetch + ReadableStream 读取）。
+ */
+router.post('/stream', (req: Request, res: Response): void => {
+  const { image } = req.body || {};
+  if (!image || typeof image !== 'string') {
+    res.status(400).json({ success: false, error: '缺少截图：请提供 image（base64 或 data URI）' });
+    return;
+  }
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  const send = (event: string, data: unknown): void => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+  send('step', { step: 0, name: '已接收截图', status: 'done' });
+
+  void (async () => {
+    try {
+      const result = await analyzeScreenshot(String(image), (step, name, status) => {
+        send('step', { step, name, status });
+      });
+      result.userId = (req as any).user?.uid ?? undefined;
+      addAnalysis(result);
+      send('done', result);
+    } catch (error: any) {
+      console.error('Analyze stream error:', error);
+      send('error', { message: error?.message || '分析失败，请稍后重试' });
+    } finally {
+      res.end();
+    }
+  })();
+});
+
 router.get('/', (req: Request, res: Response): void => {
   const list = getAnalyses().map(a => ({
     id: a.id,
@@ -103,6 +143,40 @@ router.get('/', (req: Request, res: Response): void => {
 
 router.get('/rules', (req: Request, res: Response): void => {
   res.json({ success: true, data: listRules() });
+});
+
+/**
+ * 反馈统计（规则健康度）：按命中的规则聚合采纳情况，支撑 rules.yaml 调权。
+ * 注意：必须定义在 /:id 之前。
+ */
+router.get('/feedback/stats', (req: Request, res: Response): void => {
+  const analyses = getAnalyses();
+  const byId = new Map(analyses.map(a => [a.id, a]));
+  const stats = new Map<string, { ruleId: string; adopted: number; edited: number; rejected: number }>();
+
+  for (const fb of getFeedback()) {
+    const analysis = byId.get(fb.analysisId);
+    const ruleId = analysis?.decision.ruleId || 'unknown';
+    if (!stats.has(ruleId)) {
+      stats.set(ruleId, { ruleId, adopted: 0, edited: 0, rejected: 0 });
+    }
+    const s = stats.get(ruleId)!;
+    if (fb.outcome === 'adopted') s.adopted++;
+    else if (fb.outcome === 'edited') s.edited++;
+    else s.rejected++;
+  }
+
+  const data = Array.from(stats.values())
+    .map(s => ({
+      ...s,
+      total: s.adopted + s.edited + s.rejected,
+      adoptRate: s.adopted + s.edited + s.rejected > 0
+        ? Number(((s.adopted + s.edited * 0.5) / (s.adopted + s.edited + s.rejected)).toFixed(2))
+        : 0,
+    }))
+    .sort((a, b) => b.total - a.total);
+
+  res.json({ success: true, data });
 });
 
 router.get('/:id', (req: Request, res: Response): void => {

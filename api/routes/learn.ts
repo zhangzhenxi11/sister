@@ -5,8 +5,7 @@ import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import { processVideo, processAudio, processImage, processText, processPdf, type MaterialType } from '../services/multimodal.js';
 import { addVectors } from '../services/vectorStore.js';
-import { getMaterials, addMaterial, saveMaterials, loadMaterials, loadPersonas, addPersona, type Material, type Persona } from '../data/store.js';
-import { generatePersonaFromMaterials } from '../services/personaAgent.js';
+import { getMaterials, addMaterial, saveMaterials, loadMaterials, type Material } from '../data/store.js';
 
 const router = express.Router();
 
@@ -190,91 +189,6 @@ router.get('/local-files', (req: Request, res: Response): void => {
   } catch (error) {
     console.error('Error reading local files:', error);
     res.json({ success: true, data: [] });
-  }
-});
-
-router.post('/persona', async (req: Request, res: Response): Promise<void> => {
-  try {
-    loadPersonas();
-    
-    const { name, description, style, materialIds = [] } = req.body;
-
-    if (!name && materialIds.length === 0) {
-      res.status(400).json({ success: false, error: 'Name or materialIds is required' });
-      return;
-    }
-
-    console.log('Creating persona with materialIds:', materialIds);
-    console.log('All materials before filter:', getMaterials().map(m => ({ id: m.id, title: m.title, status: m.status })));
-
-    let personaData: Omit<Persona, 'id' | 'createdAt' | 'updatedAt'>;
-
-    if (materialIds.length > 0) {
-      const allMaterials = getMaterials();
-      const selectedMaterials = allMaterials.filter(m => materialIds.includes(m.id) && m.status === 'completed');
-      
-      console.log('Selected materials for persona:', selectedMaterials.map(m => ({ id: m.id, title: m.title, contentLength: m.content?.length })));
-
-      if (selectedMaterials.length === 0) {
-        res.status(400).json({ success: false, error: 'No valid materials found. Please upload and process materials first.' });
-        return;
-      }
-
-      personaData = {
-        ...(await generatePersonaFromMaterials(
-          selectedMaterials.map(m => ({
-            id: m.id,
-            content: m.content || m.summary || '',
-            summary: m.summary,
-            type: m.type,
-          })),
-          name
-        )),
-        isActive: false,
-      };
-    } else {
-      personaData = {
-        name: name || 'AI人格',
-        description: description || '',
-        style: style || 'gentle',
-        systemPrompt: description || '你是一个温暖的AI情感助手。',
-        knowledgeGraph: [],
-        rules: [
-          {
-            id: 'rule-1',
-            name: '基本规则',
-            description: '保持友好和专业',
-            priority: 1,
-            action: '保持友好和专业',
-          },
-        ],
-        isActive: false,
-        stats: {
-          totalConversations: 0,
-          successfulInteractions: 0,
-          failedInteractions: 0,
-          feedbackScores: [],
-          lastUpdated: new Date(),
-        },
-      };
-    }
-
-    const persona: Persona = {
-      ...personaData,
-      id: uuidv4(),
-      isActive: false,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      materialIds,
-    };
-
-    addPersona(persona);
-    console.log('Persona created successfully:', persona.name);
-
-    res.json({ success: true, data: persona });
-  } catch (error) {
-    console.error('Create persona error:', error);
-    res.status(500).json({ success: false, error: 'Failed to create persona' });
   }
 });
 

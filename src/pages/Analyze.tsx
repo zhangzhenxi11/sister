@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ArrowLeft, ImagePlus, ClipboardPaste, X, LogIn, LogOut, Loader2,
+  ArrowLeft, ImagePlus, ClipboardPaste, X, LogOut, Loader2,
   Check, ThumbsUp, ThumbsDown, ChevronDown, ChevronUp, ScanLine,
 } from 'lucide-react';
-import { useAuthStore, sendSmsCode, verifySmsCode, authFetch } from '@/stores/authStore';
-import { uploadScreenshot } from '@/lib/imageCompress';
+import { useAuthStore, authFetch } from '@/stores/authStore';
+import { analyzeWithStream, type StepEvent } from '@/lib/analyzeStream';
+import LoginCard from '@/components/LoginCard';
 import type { AnalysisResult } from '../../api/services/analysis/types';
 
 /* ---------------- 策略配色 ---------------- */
@@ -17,97 +18,6 @@ const STRATEGY_STYLES: Record<string, { badge: string; bg: string; label: string
 };
 
 const DEFENSE_LABELS: Record<string, string> = { low: '防御低', medium: '防御中', high: '防御高' };
-
-/* ---------------- 登录卡片 ---------------- */
-function LoginCard() {
-  const setAuth = useAuthStore(s => s.setAuth);
-  const [phone, setPhone] = useState('');
-  const [code, setCode] = useState('');
-  const [devCode, setDevCode] = useState('');
-  const [countdown, setCountdown] = useState(0);
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState<'send' | 'login' | null>(null);
-
-  useEffect(() => {
-    if (countdown <= 0) return;
-    const t = setTimeout(() => setCountdown(c => c - 1), 1000);
-    return () => clearTimeout(t);
-  }, [countdown]);
-
-  const handleSend = async () => {
-    setError('');
-    setBusy('send');
-    try {
-      const data = await sendSmsCode(phone);
-      setCountdown(60);
-      if (data.devCode) setDevCode(data.devCode);
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const handleLogin = async () => {
-    setError('');
-    setBusy('login');
-    try {
-      const data = await verifySmsCode(phone, code);
-      setAuth(data.token, data.user);
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  return (
-    <div className="bg-white rounded-2xl p-6 shadow-lg space-y-4">
-      <div className="flex items-center gap-2 text-gray-800">
-        <LogIn className="w-5 h-5 text-pink-500" />
-        <h2 className="font-semibold">手机号登录</h2>
-      </div>
-      <p className="text-xs text-gray-400">登录后分析记录自动同步到账号；不登录也可匿名使用</p>
-      <input
-        type="tel"
-        inputMode="numeric"
-        placeholder="手机号"
-        value={phone}
-        onChange={e => setPhone(e.target.value)}
-        className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-pink-300"
-      />
-      <div className="flex gap-2">
-        <input
-          type="tel"
-          inputMode="numeric"
-          placeholder="6 位验证码"
-          value={code}
-          onChange={e => setCode(e.target.value)}
-          className="flex-1 rounded-xl border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-pink-300"
-        />
-        <button
-          onClick={handleSend}
-          disabled={busy === 'send' || countdown > 0 || phone.length !== 11}
-          className="px-4 rounded-xl bg-pink-100 text-pink-600 text-sm font-medium disabled:opacity-40 whitespace-nowrap"
-        >
-          {countdown > 0 ? `${countdown}s` : '发送验证码'}
-        </button>
-      </div>
-      {devCode && (
-        <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2">开发模式验证码：{devCode}</p>
-      )}
-      {error && <p className="text-xs text-red-500">{error}</p>}
-      <button
-        onClick={handleLogin}
-        disabled={busy === 'login' || code.length !== 6}
-        className="w-full py-3 rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 text-white font-medium disabled:opacity-40 flex items-center justify-center gap-2"
-      >
-        {busy === 'login' && <Loader2 className="w-4 h-4 animate-spin" />}
-        登录
-      </button>
-    </div>
-  );
-}
 
 /* ---------------- 结果视图 ---------------- */
 function ResultView({ result }: { result: AnalysisResult }) {
@@ -298,7 +208,7 @@ export default function Analyze() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [progress, setProgress] = useState(0);
+  const [steps, setSteps] = useState<StepEvent[]>([]);
   const [error, setError] = useState('');
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -344,15 +254,17 @@ export default function Analyze() {
   const handleAnalyze = async () => {
     if (!file || uploading) return;
     setUploading(true);
-    setProgress(0);
+    setSteps([]);
     setError('');
     try {
-      const res = await uploadScreenshot(file, setProgress, token);
-      const json = await res.json();
-      if (!json.success) {
-        throw new Error(json.error || '分析失败');
-      }
-      setResult(json.data as AnalysisResult);
+      const data = await analyzeWithStream(file, token, e => {
+        setSteps(prev => {
+          const next = prev.filter(s => s.step !== e.step);
+          next.push(e);
+          return next.sort((a, b) => a.step - b.step);
+        });
+      });
+      setResult(data);
       loadHistory();
     } catch (e: any) {
       setError(e.message || '网络异常，请稍后重试');
@@ -438,16 +350,19 @@ export default function Analyze() {
           {error && <p className="text-xs text-red-500 mt-3">{error}</p>}
 
           {uploading && (
-            <div className="mt-4">
-              <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-pink-500 to-purple-600 transition-all duration-300"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-              <p className="text-xs text-gray-400 mt-1.5 text-center">
-                {progress < 100 ? `上传中 ${progress}%` : '分析中：识图 → 侧写 → 阶段 → 信号 → 决策 → 话术…'}
-              </p>
+            <div className="mt-4 bg-gray-50 rounded-xl p-3 space-y-2">
+              {steps.map(s => (
+                <div key={s.step} className="flex items-center gap-2">
+                  {s.status === 'running' ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-pink-500 flex-shrink-0" />
+                  ) : (
+                    <Check className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
+                  )}
+                  <span className={`text-xs ${s.status === 'done' ? 'text-gray-400' : 'text-gray-700'}`}>
+                    {s.name}
+                  </span>
+                </div>
+              ))}
             </div>
           )}
 
