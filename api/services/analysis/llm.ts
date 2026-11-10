@@ -63,10 +63,20 @@ export async function chatJSON<T>(opts: JSONCallOptions<T>): Promise<JSONCallRes
       temperature: opts.temperature ?? 0.3,
       max_tokens: opts.maxTokens ?? 1500,
     });
-    const content = response.choices[0]?.message?.content || '';
-    const parsed = extractJson(content);
+    const msg = response.choices[0]?.message as unknown as Record<string, unknown> | undefined;
+    const content = typeof msg?.content === 'string' ? msg.content : '';
+    // 推理模型（DeepSeek-R1 等）可能只在 reasoning_content 中输出
+    const reasoning = typeof msg?.reasoning_content === 'string' ? msg.reasoning_content : '';
+    const parsed = extractJson(content) ?? (reasoning ? extractJson(reasoning) : null);
     if (parsed === null) {
+      console.error(
+        `[${opts.label}] LLM 未返回合法 JSON（finish_reason=${response.choices[0]?.finish_reason}）:`,
+        `content="${content.slice(0, 300)}" reasoning="${reasoning.slice(0, 200)}"`,
+      );
       throw new Error('LLM 未返回合法 JSON');
+    }
+    if (response.choices[0]?.finish_reason === 'length') {
+      console.warn(`[${opts.label}] 输出被 max_tokens 截断（finish_reason=length，maxTokens=${opts.maxTokens}）`);
     }
     return { data: parsed as T, mock: false };
   } catch (error: any) {
@@ -109,7 +119,14 @@ export async function visionJSON<T>(opts: VisionJSONOptions<T>): Promise<JSONCal
     const content = response.choices[0]?.message?.content || '';
     const parsed = extractJson(content);
     if (parsed === null) {
+      console.error(
+        `[${opts.label}] 视觉调用未返回合法 JSON（finish_reason=${response.choices[0]?.finish_reason}）:`,
+        `"${content.slice(0, 300)}"`,
+      );
       throw new Error('LLM 未返回合法 JSON');
+    }
+    if (response.choices[0]?.finish_reason === 'length') {
+      console.warn(`[${opts.label}] 输出被 max_tokens 截断（maxTokens=${opts.maxTokens}）`);
     }
     return { data: parsed as T, mock: false };
   } catch (error: any) {
