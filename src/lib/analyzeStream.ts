@@ -12,12 +12,19 @@ export interface StepEvent {
 }
 
 export async function analyzeWithStream(
-  file: File,
+  files: File[],
   token: string | null,
   onStep: (e: StepEvent) => void,
 ): Promise<AnalysisResult> {
-  const compressed = await compressImage(file);
-  const base64 = await blobToBase64(compressed);
+  if (files.length === 0) {
+    throw new Error('请至少选择一张截图');
+  }
+  // 逐张压缩后转 base64（顺序执行控制内存峰值，9 张以内可接受）
+  const images: string[] = [];
+  for (const file of files) {
+    const compressed = await compressImage(file);
+    images.push(await blobToBase64(compressed));
+  }
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) {
@@ -27,7 +34,7 @@ export async function analyzeWithStream(
   const res = await fetch('/api/analyze/stream', {
     method: 'POST',
     headers,
-    body: JSON.stringify({ image: base64 }),
+    body: JSON.stringify({ images }),
   });
   if (!res.ok) {
     let message = `请求失败（${res.status}）`;

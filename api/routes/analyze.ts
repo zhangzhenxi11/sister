@@ -14,7 +14,7 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
-import { analyzeScreenshot } from '../services/analysis/index.js';
+import { analyzeScreenshots } from '../services/analysis/index.js';
 import { listRules } from '../services/rules/engine.js';
 import { optionalAuth } from '../middleware/auth.js';
 import {
@@ -31,10 +31,11 @@ const router = express.Router();
 
 router.use(optionalAuth);
 
-const MAX_UPLOAD_SIZE = 10 * 1024 * 1024; // 10MB（客户端压缩后通常 < 1MB）
+const MAX_UPLOAD_SIZE = 10 * 1024 * 1024; // 单文件 10MB（客户端压缩后通常 < 1MB）
+const MAX_UPLOAD_COUNT = 9;
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_UPLOAD_SIZE },
+  limits: { fileSize: MAX_UPLOAD_SIZE, files: MAX_UPLOAD_COUNT },
   fileFilter: (_req, file, cb) => {
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
@@ -44,9 +45,9 @@ const upload = multer({
   },
 });
 
-async function runAnalysis(imageBase64: string, req: Request, res: Response): Promise<void> {
+async function runAnalysis(images: string[], req: Request, res: Response): Promise<void> {
   try {
-    const result = await analyzeScreenshot(imageBase64);
+    const result = await analyzeScreenshots(images);
     result.userId = (req as any).user?.uid ?? undefined;
     addAnalysis(result);
 
@@ -60,18 +61,33 @@ async function runAnalysis(imageBase64: string, req: Request, res: Response): Pr
   }
 }
 
+/** 从请求中取图片数组：优先 multipart 多文件，其次 images 数组，兼容单个 image */
+function extractImages(req: Request): string[] {
+  if (Array.isArray(req.files) && req.files.length > 0) {
+    return (req.files as Express.Multer.File[]).map(f => f.buffer.toString('base64'));
+  }
+  const { images, image } = req.body || {};
+  if (Array.isArray(images) && images.length > 0) {
+    return images.filter((i: unknown) => typeof i === 'string' && i.length > 0).slice(0, 9);
+  }
+  if (typeof image === 'string' && image) {
+    return [image];
+  }
+  return [];
+}
+
 router.post('/', (req: Request, res: Response): void => {
-  const { image } = req.body || {};
-  if (!image || typeof image !== 'string') {
-    res.status(400).json({ success: false, error: '缺少截图：请提供 image（base64 或 data URI）' });
+  const images = extractImages(req);
+  if (images.length === 0) {
+    res.status(400).json({ success: false, error: '缺少截图：请提供 images 数组或 image（base64 / data URI）' });
     return;
   }
-  void runAnalysis(image, req, res);
+  void runAnalysis(images, req, res);
 });
 
-// multipart 包装：multer 错误（超限/类型不符）转为 400
+// multipart 包装：multer 错误（超限/类型不符）转为 400；支持多文件（字段名 file）
 router.post('/upload', (req: Request, res: Response, next: NextFunction): void => {
-  upload.single('file')(req, res, (err?: any) => {
+  upload.array('file', MAX_UPLOAD_COUNT)(req, res, (err?: any) => {
     if (err) {
       res.status(400).json({ success: false, error: err?.message || '文件上传失败' });
       return;
@@ -79,22 +95,23 @@ router.post('/upload', (req: Request, res: Response, next: NextFunction): void =
     next();
   });
 }, (req: Request, res: Response): void => {
-  if (!req.file || !req.file.buffer || req.file.buffer.length === 0) {
-    res.status(400).json({ success: false, error: '缺少文件：请使用 multipart 字段名 "file" 上传截图' });
+  const images = extractImages(req);
+  if (images.length === 0) {
+    res.status(400).json({ success: false, error: '缺少文件：请使用 multipart 字段名 "file" 上传至少一张截图' });
     return;
   }
-  const base64 = req.file.buffer.toString('base64');
-  void runAnalysis(base64, req, res);
+  void runAnalysis(images, req, res);
 });
 
 /**
  * SSE 流式分析：逐步推送流水线进度（event: step），最终推送结果（event: done）。
  * 前端压缩后 base64 走 JSON 提交（EventSource 不支持 POST，用 fetch + ReadableStream 读取）。
+ * 支持多张截图：{ images: [base64, ...] } 或兼容 { image: base64 }。
  */
 router.post('/stream', (req: Request, res: Response): void => {
-  const { image } = req.body || {};
-  if (!image || typeof image !== 'string') {
-    res.status(400).json({ success: false, error: '缺少截图：请提供 image（base64 或 data URI）' });
+  const images = extractImages(req);
+  if (images.length === 0) {
+    res.status(400).json({ success: false, error: '缺少截图：请提供 images 数组或 image（base64 / data URI）' });
     return;
   }
 
@@ -107,11 +124,11 @@ router.post('/stream', (req: Request, res: Response): void => {
   const send = (event: string, data: unknown): void => {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
-  send('step', { step: 0, name: '已接收截图', status: 'done' });
+  send('step', { step: 0, name: `已接收 ${images.length} 张截图`, status: 'done' });
 
   void (async () => {
     try {
-      const result = await analyzeScreenshot(String(image), (step, name, status) => {
+      const result = await analyzeScreenshots(images, (step, name, status) => {
         send('step', { step, name, status });
       });
       result.userId = (req as any).user?.uid ?? undefined;

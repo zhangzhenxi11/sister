@@ -7,7 +7,7 @@
  * 决策（5）与评分（4 的打分）为确定性逻辑，保证可解释、可回归。
  */
 import { v4 as uuidv4 } from 'uuid';
-import { parseScreenshot } from './parser.js';
+import { parseScreenshots } from './parser.js';
 import { profileRival } from './profiler.js';
 import { assessStage } from './stage.js';
 import { detectSignals } from './signals.js';
@@ -32,8 +32,8 @@ export const PIPELINE_STEPS = [
 export type StepStatus = 'running' | 'done';
 export type OnStep = (step: number, name: string, status: StepStatus) => void;
 
-export async function analyzeScreenshot(
-  imageBase64: string,
+export async function analyzeScreenshots(
+  images: string[],
   onStep?: OnStep,
 ): Promise<AnalysisResult> {
   const start = Date.now();
@@ -41,12 +41,12 @@ export async function analyzeScreenshot(
   const step = (n: number, status: StepStatus) =>
     onStep?.(n, PIPELINE_STEPS[n - 1] || `步骤 ${n}`, status);
 
-  // 1. 识图解析
+  // 1. 识图解析（支持多图合并）
   step(1, 'running');
-  const parsed = await parseScreenshot(imageBase64);
+  const parsed = await parseScreenshots(images);
   usedMock = usedMock || parsed.mock;
   step(1, 'done');
-  console.log(`[analysis] dialog parsed: ${parsed.dialog.turns.length} turns (mock=${parsed.mock})`);
+  console.log(`[analysis] dialog parsed: ${parsed.dialog.turns.length} turns from ${images.length} image(s) (mock=${parsed.mock})`);
 
   // 2. 人格侧写
   step(2, 'running');

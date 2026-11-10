@@ -203,10 +203,12 @@ interface HistoryItem {
   strategyLabel: string;
 }
 
+const MAX_IMAGES = 9;
+
 export default function Analyze() {
   const { token, user, clearAuth } = useAuthStore();
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [steps, setSteps] = useState<StepEvent[]>([]);
   const [error, setError] = useState('');
@@ -229,35 +231,59 @@ export default function Analyze() {
   // 粘贴上传（手机截图后直接粘贴）
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
-      const item = Array.from(e.clipboardData?.files || []).find(f => f.type.startsWith('image/'));
-      if (item) {
-        pickFile(item as File);
+      const items = Array.from(e.clipboardData?.files || []).filter(f => f.type.startsWith('image/'));
+      if (items.length > 0) {
+        addFiles(items as File[]);
       }
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
   }, []);
 
-  const pickFile = (f: File) => {
-    if (!f.type.startsWith('image/')) {
-      setError('请选择图片文件');
-      return;
-    }
+  const addFiles = (incoming: File[]) => {
+    const valid = incoming.filter(f => {
+      if (!f.type.startsWith('image/')) {
+        setError('请选择图片文件');
+        return false;
+      }
+      return true;
+    });
+    if (valid.length === 0) return;
     setError('');
     setResult(null);
-    setFile(f);
-    const reader = new FileReader();
-    reader.onload = e => setPreview(e.target?.result as string);
-    reader.readAsDataURL(f);
+    setFiles(prev => {
+      const next = [...prev, ...valid].slice(0, MAX_IMAGES);
+      if (prev.length + valid.length > MAX_IMAGES) {
+        setError(`最多支持 ${MAX_IMAGES} 张，已截取前 ${MAX_IMAGES} 张`);
+      }
+      // 生成预览
+      next.forEach((f, i) => {
+        if (i >= previews.length) {
+          const reader = new FileReader();
+          reader.onload = e => setPreviews(p => {
+            const copy = [...p];
+            copy[i] = e.target?.result as string;
+            return copy;
+          });
+          reader.readAsDataURL(f);
+        }
+      });
+      return next;
+    });
+  };
+
+  const removeAt = (index: number) => {
+    setFiles(prev => prev.filter((_, i) => i !== index));
+    setPreviews(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleAnalyze = async () => {
-    if (!file || uploading) return;
+    if (files.length === 0 || uploading) return;
     setUploading(true);
     setSteps([]);
     setError('');
     try {
-      const data = await analyzeWithStream(file, token, e => {
+      const data = await analyzeWithStream(files, token, e => {
         setSteps(prev => {
           const next = prev.filter(s => s.step !== e.step);
           next.push(e);
@@ -317,22 +343,48 @@ export default function Analyze() {
             ref={fileRef}
             type="file"
             accept="image/*"
+            multiple
             className="hidden"
             onChange={e => {
-              const f = e.target.files?.[0];
-              if (f) pickFile(f);
+              const list = Array.from(e.target.files || []);
+              if (list.length > 0) addFiles(list);
               e.target.value = '';
             }}
           />
-          {preview ? (
-            <div className="relative">
-              <img src={preview} alt="截图预览" className="w-full max-h-72 object-contain rounded-xl bg-gray-50" />
-              <button
-                onClick={() => { setFile(null); setPreview(null); }}
-                className="absolute top-2 right-2 p-1.5 bg-black/50 rounded-full text-white"
-              >
-                <X className="w-4 h-4" />
-              </button>
+          {previews.length > 0 ? (
+            <div>
+              <div className="grid grid-cols-3 gap-2">
+                {previews.map((src, i) => (
+                  <div key={i} className="relative">
+                    <img
+                      src={src}
+                      alt={`截图 ${i + 1}`}
+                      className="w-full h-24 object-cover rounded-xl bg-gray-50"
+                    />
+                    <span className="absolute bottom-1 left-1 text-[10px] bg-black/50 text-white px-1.5 rounded">
+                      {i + 1}/{files.length}
+                    </span>
+                    <button
+                      onClick={() => removeAt(i)}
+                      className="absolute -top-1.5 -right-1.5 p-1 bg-red-500 rounded-full text-white"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+                {files.length < MAX_IMAGES && (
+                  <button
+                    onClick={() => fileRef.current?.click()}
+                    className="h-24 rounded-xl border-2 border-dashed border-pink-200 flex flex-col items-center justify-center text-pink-300"
+                  >
+                    <ImagePlus className="w-6 h-6" />
+                    <span className="text-[10px] mt-1">继续添加</span>
+                  </button>
+                )}
+              </div>
+              <p className="text-[11px] text-gray-400 mt-2 text-center">
+                已选 {files.length} 张（最多 {MAX_IMAGES} 张，建议按时间顺序选择）
+              </p>
             </div>
           ) : (
             <button
@@ -340,7 +392,7 @@ export default function Analyze() {
               className="w-full border-2 border-dashed border-pink-200 rounded-xl py-10 flex flex-col items-center gap-2 text-pink-400"
             >
               <ImagePlus className="w-10 h-10" />
-              <span className="text-sm">点击选择聊天截图</span>
+              <span className="text-sm">点击选择聊天截图（可多选）</span>
               <span className="text-[11px] text-gray-400 flex items-center gap-1">
                 <ClipboardPaste className="w-3 h-3" /> 也可以直接粘贴截图
               </span>
@@ -368,7 +420,7 @@ export default function Analyze() {
 
           <button
             onClick={handleAnalyze}
-            disabled={!file || uploading}
+            disabled={files.length === 0 || uploading}
             className="mt-4 w-full py-3 rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 text-white font-medium disabled:opacity-40 flex items-center justify-center gap-2"
           >
             {uploading && <Loader2 className="w-4 h-4 animate-spin" />}

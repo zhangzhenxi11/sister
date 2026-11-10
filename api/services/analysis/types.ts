@@ -26,6 +26,8 @@ export interface ParsedDialog {
   rivalAlias: string;
   /** OCR / 视觉理解的原始文本备份 */
   rawText: string;
+  /** 来源截图张数 */
+  sourceImageCount?: number;
 }
 
 /** 第 2 步输出：对方人格侧写 */
